@@ -170,7 +170,6 @@ handle_client_read(ServerState* state, ClientState *cli_state) {
 	int bytesWritten = write(cli_state->fd, 
 		buffer_start, 
 		cli_state->length - cli_state->completed);
-
 	if (bytesWritten < 0) {
 		if (errno != EAGAIN && errno != EWOULDBLOCK) {
 			return -1;
