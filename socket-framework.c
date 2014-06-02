@@ -13,8 +13,8 @@
 #define DIE(value, message) if (value < 0) {perror(message); exit(value);}
 
 #define RW_STATE_NONE 0
-#define RW_STATE_READ 1
-#define RW_STATE_WRITE 2
+#define RW_STATE_READ 2
+#define RW_STATE_WRITE 4
 
 void
 _info(const char* fmt, ...) {
@@ -43,9 +43,9 @@ populate_fd_set(ServerState *state, fd_set *pReadFdSet, fd_set *pWriteFdSet) {
 			continue;
 		}
 
-		if (state->client_state[i].read_write_flag == RW_STATE_READ) {
+		if (state->client_state[i].read_write_flag & RW_STATE_READ) {
 			FD_SET(fd, pReadFdSet);
-		} else if (state->client_state[i].read_write_flag == RW_STATE_WRITE) {
+		} else if (state->client_state[i].read_write_flag & RW_STATE_WRITE) {
 			FD_SET(fd, pWriteFdSet);
 		}
 	}
@@ -60,6 +60,7 @@ disconnect_clients(ServerState *state) {
 			close(fd);
 			state->client_state[i].fd = 0;
 			state->client_state[i].data = NULL;
+			state->client_state[i].read_write_flag = RW_STATE_NONE;
 		}
 	}
 }
@@ -69,12 +70,17 @@ add_client_fd(ServerState *state, int fd) {
 	for (int i = 0; i < MAX_CLIENTS; ++i) {
 		if (state->client_state[i].fd == 0) {
 			//We have a free slot
-			state->client_state[i].fd = fd;
-			state->client_state[i].data = NULL;
-			state->client_state[i].read_write_flag = RW_STATE_NONE;
-			state->client_state[i].buffer = NULL;
-			state->client_state[i].length = 0;
-			state->client_state[i].completed = 0;
+			ClientState *cstate = state->client_state + i;
+
+			cstate->fd = fd;
+			cstate->data = NULL;
+			cstate->read_write_flag = RW_STATE_NONE;
+			cstate->read_buffer = NULL;
+			cstate->read_length = 0;
+			cstate->read_completed = 0;
+			cstate->write_buffer = NULL;
+			cstate->write_length = 0;
+			cstate->write_completed = 0;
 
 			return i;
 		}
@@ -88,12 +94,17 @@ remove_client_fd(ServerState *state, int fd) {
 	for (int i = 0; i < MAX_CLIENTS; ++i) {
 		if (state->client_state[i].fd == fd) {
 			//We found it!
-			state->client_state[i].fd = 0;
-			state->client_state[i].data = NULL;
-			state->client_state[i].read_write_flag = RW_STATE_NONE;
-			state->client_state[i].buffer = NULL;
-			state->client_state[i].length = 0;
-			state->client_state[i].completed = 0;
+			ClientState *cstate = state->client_state + i;
+
+			cstate->fd = fd;
+			cstate->data = NULL;
+			cstate->read_write_flag = RW_STATE_NONE;
+			cstate->read_buffer = NULL;
+			cstate->read_length = 0;
+			cstate->read_completed = 0;
+			cstate->write_buffer = NULL;
+			cstate->write_length = 0;
+			cstate->write_completed = 0;
 
 			return i;
 		}
@@ -104,23 +115,25 @@ remove_client_fd(ServerState *state, int fd) {
 
 int
 handle_client_write(ServerState* state, ClientState *cli_state) {
-	if (cli_state->read_write_flag != RW_STATE_READ) {
+	if (!(cli_state->read_write_flag & RW_STATE_READ)) {
 		_info("Socket is not trying to read.");
 		return -1;
 	}
-	if (cli_state->buffer == NULL) {
+	if (cli_state->read_buffer == NULL) {
 		_info("Read buffer not setup.");
 		return -1;
 	}
-	if (cli_state->length == cli_state->completed) {
+	if (cli_state->read_length == cli_state->read_completed) {
 		_info("Read was already completed.");
 		return -1;
 	}
 
-	char *buffer_start = cli_state->buffer + cli_state->completed;
+	char *buffer_start = cli_state->read_buffer + cli_state->read_completed;
 	int bytesRead = read(cli_state->fd, 
 		buffer_start, 
-		cli_state->length - cli_state->completed);
+		cli_state->read_length - cli_state->read_completed);
+
+	_info("Read %d of %d bytes", bytesRead, cli_state->read_length);
 
 	if (bytesRead < 0) {
 		if (errno != EAGAIN && errno != EWOULDBLOCK) {
@@ -135,13 +148,13 @@ handle_client_write(ServerState* state, ClientState *cli_state) {
 		return -1;
 	}
 	
-	cli_state->completed += bytesRead;
+	cli_state->read_completed += bytesRead;
 
 	if (state->on_read) {
 		state->on_read(state, cli_state, buffer_start, bytesRead);
 	}
-	if (cli_state->completed == cli_state->length) {
-		cli_state->read_write_flag = RW_STATE_NONE;
+	if (cli_state->read_completed == cli_state->read_length) {
+		cli_state->read_write_flag = cli_state->read_write_flag & (~RW_STATE_READ);
 
 		if (state->on_read_completed) {
 			state->on_read_completed(state, cli_state);
@@ -153,23 +166,24 @@ handle_client_write(ServerState* state, ClientState *cli_state) {
 
 int
 handle_client_read(ServerState* state, ClientState *cli_state) {
-	if (cli_state->read_write_flag != RW_STATE_WRITE) {
+	if (!(cli_state->read_write_flag & RW_STATE_WRITE)) {
 		_info("Socket is not trying to write.");
 		return -1;
 	}
-	if (cli_state->buffer == NULL) {
+	if (cli_state->write_buffer == NULL) {
 		_info("Write buffer not setup.");
 		return -1;
 	}
-	if (cli_state->length == cli_state->completed) {
+	if (cli_state->write_length == cli_state->write_completed) {
 		_info("Write was already completed.");
 		return -1;
 	}
 
-	char *buffer_start = cli_state->buffer + cli_state->completed;
+	char *buffer_start = cli_state->write_buffer + cli_state->write_completed;
 	int bytesWritten = write(cli_state->fd, 
 		buffer_start, 
-		cli_state->length - cli_state->completed);
+		cli_state->write_length - cli_state->write_completed);
+	_info("Written %d of %d bytes", bytesWritten, cli_state->write_length);
 	if (bytesWritten < 0) {
 		if (errno != EAGAIN && errno != EWOULDBLOCK) {
 			return -1;
@@ -184,13 +198,13 @@ handle_client_read(ServerState* state, ClientState *cli_state) {
 		return -1;
 	}
 	
-	cli_state->completed += bytesWritten;
+	cli_state->write_completed += bytesWritten;
 
 	if (state->on_write) {
 		state->on_write(state, cli_state, buffer_start, bytesWritten);
 	}
-	if (cli_state->completed == cli_state->length) {
-		cli_state->read_write_flag = RW_STATE_NONE;
+	if (cli_state->write_completed == cli_state->write_length) {
+		cli_state->read_write_flag &= ~RW_STATE_WRITE;
 
 		if (state->on_write_completed) {
 			state->on_write_completed(state, cli_state);
@@ -343,14 +357,16 @@ int schedule_read(ClientState *cstate, char *buffer, int length) {
 	if (cstate->fd <= 0) {
 		return -1;
 	}
-	if (cstate->read_write_flag != RW_STATE_NONE) {
+	if (cstate->read_write_flag & RW_STATE_READ) {
+		//Already reading!
 		return -2;
 	}
-	cstate->buffer = buffer;
-	cstate->length = length;
-	cstate->completed = 0;
-	cstate->read_write_flag = RW_STATE_READ;
+	cstate->read_buffer = buffer;
+	cstate->read_length = length;
+	cstate->read_completed = 0;
+	cstate->read_write_flag |= RW_STATE_READ;
 
+	_info("Scheduling read: %d", cstate->read_write_flag);
 	return 0;
 }
 
@@ -358,20 +374,29 @@ int schedule_write(ClientState *cstate, char *buffer, int length) {
 	if (cstate->fd <= 0) {
 		return -1;
 	}
-	if (cstate->read_write_flag != RW_STATE_NONE) {
+	if (cstate->read_write_flag & RW_STATE_WRITE) {
+		//Already writing
 		return -2;
 	}
-	cstate->buffer = buffer;
-	cstate->length = length;
-	cstate->completed = 0;
-	cstate->read_write_flag = RW_STATE_WRITE;
+	cstate->write_buffer = buffer;
+	cstate->write_length = length;
+	cstate->write_completed = 0;
+	cstate->read_write_flag |= RW_STATE_WRITE;
 
+	_info("Scheduling write: %d", cstate->read_write_flag);
 	return 0;
 }
 
-void cancel_read_write(ClientState *cstate) {
-	cstate->buffer = NULL;
-	cstate->length = 0;
-	cstate->completed = 0;
-	cstate->read_write_flag = RW_STATE_NONE;
+void cancel_read(ClientState *cstate) {
+	cstate->read_buffer = NULL;
+	cstate->read_length = 0;
+	cstate->read_completed = 0;
+	cstate->read_write_flag &= ~RW_STATE_READ;
+	_info("Cancel read: %d", cstate->read_write_flag);
+}
+void cancel_write(ClientState *cstate) {
+	cstate->write_buffer = NULL;
+	cstate->write_length = 0;
+	cstate->write_completed = 0;
+	cstate->read_write_flag &= ~RW_STATE_WRITE;
 }

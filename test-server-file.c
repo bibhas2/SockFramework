@@ -137,7 +137,7 @@ void on_read(ServerState *state, ClientState *cli_state, char *buff, int length)
 			httpState->parse_state = STATE_READING_HEADER;
 		} else if (httpState->parse_state == HEADER_READ_COMPLETED) {
 			//Send response
-			cancel_read_write(cli_state);
+			cancel_read(cli_state);
 			start_response(cli_state);
 		}
 	}

@@ -106,6 +106,7 @@ stuff_request_byte(HTTPState *state, char c) {
 
 void
 start_response(ClientState *cli_state) {
+	_info("Starting response.");
 	struct stat st;
 
 	int status = stat("image.png", &st);
@@ -118,6 +119,7 @@ start_response(ClientState *cli_state) {
 	HTTPState *httpState = (HTTPState*) cli_state->data;
 	httpState->file_size = st.st_size;
 	httpState->parse_state = WRITING_RESPONSE_HEADER;
+	_info("Scheduling response header.");
 	schedule_write(cli_state, str, strlen(str));
 }
 
@@ -133,7 +135,7 @@ void on_read(ServerState *state, ClientState *cli_state, char *buff, int length)
 			httpState->parse_state = STATE_READING_HEADER;
 		} else if (httpState->parse_state == HEADER_READ_COMPLETED) {
 			//Send response
-			cancel_read_write(cli_state);
+			cancel_read(cli_state);
 			start_response(cli_state);
 		}
 	}
@@ -165,7 +167,8 @@ void on_write_completed(ServerState *state, ClientState *cli_state) {
 void on_read_completed(ServerState *state, ClientState *cli_state) {
 	//If we are still parsing request, keep reading
 	HTTPState *httpState = (HTTPState*) cli_state->data;
-	if (httpState->parse_state != HEADER_READ_COMPLETED) {
+	if (httpState->parse_state < HEADER_READ_COMPLETED) {
+		_info("Still need to read header.");
 		int status = schedule_read(cli_state, httpState->io_buffer, 
 			sizeof(httpState->io_buffer));
 		assert(status == 0);

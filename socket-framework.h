@@ -2,9 +2,14 @@
 
 typedef struct _ClientState {
 	int fd;
-	char *buffer;
-	int length;
-	int completed;
+
+	char *read_buffer;
+	int read_length;
+	int read_completed;
+	char *write_buffer;
+	int write_length;
+	int write_completed;
+
 	int read_write_flag;
 	void *data;
 } ClientState;
@@ -31,4 +36,5 @@ void _info(const char* fmt, ...);
 void disconnect_client(ServerState *state, ClientState *cli_state);
 int schedule_read(ClientState *cli_state, char *buffer, int length);
 int schedule_write(ClientState *cli_state, char *buffer, int length);
-void cancel_read_write(ClientState *cstate);
+void cancel_read(ClientState *cstate);
+void cancel_write(ClientState *cstate);
