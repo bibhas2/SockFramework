@@ -12,10 +12,6 @@
 
 #define DIE(value, message) if (value < 0) {perror(message); exit(value);}
 
-#define RW_STATE_NONE 0
-#define RW_STATE_READ 2
-#define RW_STATE_WRITE 4
-
 void
 _info(const char* fmt, ...) {
         va_list ap;
