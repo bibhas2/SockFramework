@@ -14,9 +14,9 @@
 
 void _info(const char* fmt, ...);
 
-ClientState*
-new_client_state(const char *host, int port) {
-	ClientState *cstate = NULL;
+Client*
+newClient(const char *host, int port) {
+	Client *cstate = NULL;
 	_info("Connecting to %s:%d", host, port);
 
 	char port_str[128];
@@ -47,7 +47,7 @@ new_client_state(const char *host, int port) {
 
 	freeaddrinfo(res);
 
-	cstate = (ClientState*) calloc(1, sizeof(ClientState));
+	cstate = (Client*) calloc(1, sizeof(Client));
 	cstate->fd = sock;
 	cstate->read_write_flag = RW_STATE_NONE;
 
@@ -55,12 +55,12 @@ new_client_state(const char *host, int port) {
 }
 
 void
-delete_client_state(ClientState *cstate) {
+deleteClient(Client *cstate) {
 	free(cstate);
 }
 
 int
-handle_server_read(ClientState *cli_state) {
+handle_server_read(Client *cli_state) {
         if (!(cli_state->read_write_flag & RW_STATE_WRITE)) {
                 _info("Socket is not trying to write.");
                 return -1;
@@ -110,7 +110,7 @@ handle_server_read(ClientState *cli_state) {
 }
 
 int
-handle_server_write(ClientState *cli_state) {
+handle_server_write(Client *cli_state) {
         if (!(cli_state->read_write_flag & RW_STATE_READ)) {
                 _info("Socket is not trying to read.");
                 return -1;
@@ -160,7 +160,7 @@ handle_server_write(ClientState *cli_state) {
 }
 
 void
-client_loop(ClientState *cstate) {
+clientLoop(Client *cstate) {
         fd_set readFdSet, writeFdSet;
         struct timeval timeout;
 

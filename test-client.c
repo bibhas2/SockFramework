@@ -6,17 +6,17 @@
 char read_buff[128], write_buff[128];
 
 void
-on_write_completed(ClientState *cstate) {
-	schedule_read(cstate, read_buff, sizeof(read_buff) - 1);
+on_write_completed(Client *cstate) {
+	clientScheduleRead(cstate, read_buff, sizeof(read_buff) - 1);
 }
 
 void
-on_read_completed(ClientState *cstate) {
-	schedule_read(cstate, read_buff, sizeof(read_buff) - 1);
+on_read_completed(Client *cstate) {
+	clientScheduleRead(cstate, read_buff, sizeof(read_buff) - 1);
 }
 
 void
-on_read(ClientState *cstate, char *buff, int length) {
+on_read(Client *cstate, char *buff, int length) {
 	buff[length] = '\0';
 
 	printf("%s", buff);
@@ -24,7 +24,7 @@ on_read(ClientState *cstate, char *buff, int length) {
 
 int
 main(int argc, char **argv) {
-	ClientState *cstate = new_client_state(argv[1], 80);
+	Client *cstate = newClient(argv[1], 80);
 	if (cstate == NULL) {
 		return -1;
 	}
@@ -38,11 +38,11 @@ main(int argc, char **argv) {
                 "Accept: */*\r\n"
                 "\r\n";
 
-	schedule_write(cstate, req, strlen(req));
+	clientScheduleWrite(cstate, req, strlen(req));
 
-	client_loop(cstate);
+	clientLoop(cstate);
 
-	delete_client_state(cstate);
+	deleteClient(cstate);
 
 	return 0;
 }

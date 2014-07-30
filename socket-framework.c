@@ -24,7 +24,7 @@ _info(const char* fmt, ...) {
 }
 
 void
-populate_fd_set(ServerState *state, fd_set *pReadFdSet, fd_set *pWriteFdSet) {
+populate_fd_set(Server *state, fd_set *pReadFdSet, fd_set *pWriteFdSet) {
 	FD_ZERO(pReadFdSet);
 	FD_ZERO(pWriteFdSet);
 	
@@ -48,7 +48,7 @@ populate_fd_set(ServerState *state, fd_set *pReadFdSet, fd_set *pWriteFdSet) {
 }
 
 void
-disconnect_clients(ServerState *state) {
+disconnect_clients(Server *state) {
 	for (int i = 0; i < MAX_CLIENTS; ++i) {
 		int fd = state->client_state[i].fd;
 
@@ -62,11 +62,11 @@ disconnect_clients(ServerState *state) {
 }
 
 int
-add_client_fd(ServerState *state, int fd) {
+add_client_fd(Server *state, int fd) {
 	for (int i = 0; i < MAX_CLIENTS; ++i) {
 		if (state->client_state[i].fd == 0) {
 			//We have a free slot
-			ClientState *cstate = state->client_state + i;
+			Client *cstate = state->client_state + i;
 
 			cstate->fd = fd;
 			cstate->data = NULL;
@@ -86,11 +86,11 @@ add_client_fd(ServerState *state, int fd) {
 }
 
 int
-remove_client_fd(ServerState *state, int fd) {
+remove_client_fd(Server *state, int fd) {
 	for (int i = 0; i < MAX_CLIENTS; ++i) {
 		if (state->client_state[i].fd == fd) {
 			//We found it!
-			ClientState *cstate = state->client_state + i;
+			Client *cstate = state->client_state + i;
 
 			cstate->fd = fd;
 			cstate->data = NULL;
@@ -110,7 +110,7 @@ remove_client_fd(ServerState *state, int fd) {
 }
 
 int
-handle_client_write(ServerState* state, ClientState *cli_state) {
+handle_client_write(Server* state, Client *cli_state) {
 	if (!(cli_state->read_write_flag & RW_STATE_READ)) {
 		_info("Socket is not trying to read.");
 		return -1;
@@ -161,7 +161,7 @@ handle_client_write(ServerState* state, ClientState *cli_state) {
 }
 
 int
-handle_client_read(ServerState* state, ClientState *cli_state) {
+handle_client_read(Server* state, Client *cli_state) {
 	if (!(cli_state->read_write_flag & RW_STATE_WRITE)) {
 		_info("Socket is not trying to write.");
 		return -1;
@@ -211,7 +211,7 @@ handle_client_read(ServerState* state, ClientState *cli_state) {
 }
 
 void
-disconnect_client(ServerState *state, ClientState *cli_state) {
+serverDisconnect(Server *state, Client *cli_state) {
 	if (state->on_client_disconnect) {
 		state->on_client_disconnect(state, cli_state);
 	}
@@ -220,7 +220,7 @@ disconnect_client(ServerState *state, ClientState *cli_state) {
 }
 
 void
-server_loop(ServerState *state) {
+server_loop(Server *state) {
 	if (state->on_loop_start) {
 		state->on_loop_start(state);
 	}
@@ -269,7 +269,7 @@ server_loop(ServerState *state) {
 			//Client wrote something or disconnected
 			for (int i = 0; i < MAX_CLIENTS; ++i) {
 				if (FD_ISSET(state->client_state[i].fd, &readFdSet)) {
-					ClientState *cli_state = state->client_state + i;
+					Client *cli_state = state->client_state + i;
 					int status = handle_client_write(state, cli_state);
 					if (status < 1) {
 						_info("Client is finished. Status: %d", status);
@@ -281,7 +281,7 @@ server_loop(ServerState *state) {
 					}
 				}
 				if (FD_ISSET(state->client_state[i].fd, &writeFdSet)) {
-					ClientState *cli_state = state->client_state + i;
+					Client *cli_state = state->client_state + i;
 					int status = handle_client_read(state, cli_state);
 					if (status < 1) {
 						_info("Client is finished. Status: %d", status);
@@ -300,7 +300,7 @@ server_loop(ServerState *state) {
 }
 
 void
-start_server(ServerState *state) {
+serverStart(Server *state) {
 	int status;
 
 	int sock = socket(PF_INET, SOCK_STREAM, 0);
@@ -336,8 +336,8 @@ start_server(ServerState *state) {
 	close(sock);
 }
 
-ServerState* new_server_state(int port) {
-	ServerState *state = (ServerState*) calloc(1, sizeof(ServerState));
+Server* newServer(int port) {
+	Server *state = (Server*) calloc(1, sizeof(Server));
 
 	state->port = port;
 
@@ -345,11 +345,11 @@ ServerState* new_server_state(int port) {
 }
 
 void
-delete_server_state(ServerState *state) {
+deleteServer(Server *state) {
 	free(state);
 }
 
-int schedule_read(ClientState *cstate, char *buffer, int length) {
+int clientScheduleRead(Client *cstate, char *buffer, int length) {
 	if (cstate->fd <= 0) {
 		return -1;
 	}
@@ -366,7 +366,7 @@ int schedule_read(ClientState *cstate, char *buffer, int length) {
 	return 0;
 }
 
-int schedule_write(ClientState *cstate, char *buffer, int length) {
+int clientScheduleWrite(Client *cstate, char *buffer, int length) {
 	if (cstate->fd <= 0) {
 		return -1;
 	}
@@ -383,14 +383,14 @@ int schedule_write(ClientState *cstate, char *buffer, int length) {
 	return 0;
 }
 
-void cancel_read(ClientState *cstate) {
+void clientCancelRead(Client *cstate) {
 	cstate->read_buffer = NULL;
 	cstate->read_length = 0;
 	cstate->read_completed = 0;
 	cstate->read_write_flag &= ~RW_STATE_READ;
 	_info("Cancel read: %d", cstate->read_write_flag);
 }
-void cancel_write(ClientState *cstate) {
+void clientCancelWrite(Client *cstate) {
 	cstate->write_buffer = NULL;
 	cstate->write_length = 0;
 	cstate->write_completed = 0;

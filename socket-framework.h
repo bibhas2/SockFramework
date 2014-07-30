@@ -4,7 +4,7 @@
 #define RW_STATE_READ 2
 #define RW_STATE_WRITE 4
 
-typedef struct _ClientState {
+typedef struct _Client {
 	int fd;
 
 	char *read_buffer;
@@ -17,38 +17,39 @@ typedef struct _ClientState {
 	int read_write_flag;
 	void *data;
 
-        void (*on_server_connect)(struct _ClientState* client_state);
-        void (*on_server_disconnect)(struct _ClientState *client_state);
-        void (*on_read)(struct _ClientState *client_state, char* buffer, int length);
-        void (*on_write)(struct _ClientState *client_state, char* buffer, int length);
-        void (*on_read_completed)(struct _ClientState *client_state);
-        void (*on_write_completed)(struct _ClientState *client_state);
-} ClientState;
+        void (*on_server_connect)(struct _Client* client_state);
+        void (*on_server_disconnect)(struct _Client *client_state);
+        void (*on_read)(struct _Client *client_state, char* buffer, int length);
+        void (*on_write)(struct _Client *client_state, char* buffer, int length);
+        void (*on_read_completed)(struct _Client *client_state);
+        void (*on_write_completed)(struct _Client *client_state);
+} Client;
 
-typedef struct _ServerState {
-	ClientState client_state[MAX_CLIENTS];
+typedef struct _Server {
+	Client client_state[MAX_CLIENTS];
 	int port;
 	int server_socket;
 
-	void (*on_loop_start)(struct _ServerState* state);
-	void (*on_loop_end)(struct _ServerState* state);
-	void (*on_client_connect)(struct _ServerState* state, ClientState* client_state);
-	void (*on_client_disconnect)(struct _ServerState* state, ClientState *client_state);
-	void (*on_read)(struct _ServerState* state, ClientState *client_state, char* buffer, int length);
-	void (*on_write)(struct _ServerState* state, ClientState *client_state, char* buffer, int length);
-	void (*on_read_completed)(struct _ServerState* state, ClientState *client_state);
-	void (*on_write_completed)(struct _ServerState* state, ClientState *client_state);
-} ServerState;
+	void (*on_loop_start)(struct _Server* state);
+	void (*on_loop_end)(struct _Server* state);
+	void (*on_client_connect)(struct _Server* state, Client* client_state);
+	void (*on_client_disconnect)(struct _Server* state, Client *client_state);
+	void (*on_read)(struct _Server* state, Client *client_state, char* buffer, int length);
+	void (*on_write)(struct _Server* state, Client *client_state, char* buffer, int length);
+	void (*on_read_completed)(struct _Server* state, Client *client_state);
+	void (*on_write_completed)(struct _Server* state, Client *client_state);
+} Server;
 
-ServerState *new_server_state(int port);
-void start_server(ServerState* state);
-void delete_server_state(ServerState *state);
 void _info(const char* fmt, ...);
-void disconnect_client(ServerState *state, ClientState *cli_state);
-int schedule_read(ClientState *cli_state, char *buffer, int length);
-int schedule_write(ClientState *cli_state, char *buffer, int length);
-void cancel_read(ClientState *cstate);
-void cancel_write(ClientState *cstate);
-void client_loop(ClientState *cstate);
-ClientState* new_client_state(const char *host, int port);
-void delete_client_state(ClientState *cstate);
+
+Server *newServer(int port);
+void serverStart(Server* state);
+void deleteServer(Server *state);
+void serverDisconnect(Server *state, Client *cli_state);
+int clientScheduleRead(Client *cli_state, char *buffer, int length);
+int clientScheduleWrite(Client *cli_state, char *buffer, int length);
+void clientCancelRead(Client *cstate);
+void clientCancelWrite(Client *cstate);
+void clientLoop(Client *cstate);
+Client* newClient(const char *host, int port);
+void deleteClient(Client *cstate);

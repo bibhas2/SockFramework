@@ -33,11 +33,11 @@ typedef struct _HTTPState {
 } HTTPState;
 
 void
-init_server(ServerState* state) {
+init_server(Server* state) {
 	_info("Server loop is starting");
 }
 
-void on_connect(ServerState *state, ClientState *cli_state) {
+void on_connect(Server *state, Client *cli_state) {
 	_info("Client connected %d", cli_state->fd);
 	HTTPState *httpState = (HTTPState*) malloc(sizeof(HTTPState));
 	httpState->parse_state = STATE_READING_PROTOCOL_LINE;
@@ -48,12 +48,12 @@ void on_connect(ServerState *state, ClientState *cli_state) {
 	cli_state->data = httpState;
 
 	//Start reading request
-	int status = schedule_read(cli_state, httpState->io_buffer, 
+	int status = clientScheduleRead(cli_state, httpState->io_buffer, 
 		sizeof(httpState->io_buffer));
 	assert(status == 0);
 }
 
-void on_disconnect(ServerState *state, ClientState *cli_state) {
+void on_disconnect(Server *state, Client *cli_state) {
 	_info("Client disconnected %d", cli_state->fd);
 
 	HTTPState *httpState = (HTTPState*) cli_state->data;
@@ -105,7 +105,7 @@ stuff_request_byte(HTTPState *state, char c) {
 
 
 void
-start_response(ClientState *cli_state) {
+start_response(Client *cli_state) {
 	_info("Starting response.");
 	struct stat st;
 
@@ -120,10 +120,10 @@ start_response(ClientState *cli_state) {
 	httpState->file_size = st.st_size;
 	httpState->parse_state = WRITING_RESPONSE_HEADER;
 	_info("Scheduling response header.");
-	schedule_write(cli_state, str, strlen(str));
+	clientScheduleWrite(cli_state, str, strlen(str));
 }
 
-void on_read(ServerState *state, ClientState *cli_state, char *buff, int length) {
+void on_read(Server *state, Client *cli_state, char *buff, int length) {
 	HTTPState *httpState = (HTTPState*) cli_state->data;
 
 	for (int i = 0; i < length; ++i) {
@@ -135,13 +135,13 @@ void on_read(ServerState *state, ClientState *cli_state, char *buff, int length)
 			httpState->parse_state = STATE_READING_HEADER;
 		} else if (httpState->parse_state == HEADER_READ_COMPLETED) {
 			//Send response
-			cancel_read(cli_state);
+			clientCancelRead(cli_state);
 			start_response(cli_state);
 		}
 	}
 }
 
-void on_write_completed(ServerState *state, ClientState *cli_state) {
+void on_write_completed(Server *state, Client *cli_state) {
 	HTTPState *httpState = (HTTPState*) cli_state->data;
 
 	if (httpState->parse_state == WRITING_RESPONSE_HEADER) {
@@ -154,29 +154,29 @@ void on_write_completed(ServerState *state, ClientState *cli_state) {
 		assert(httpState->file_map != MAP_FAILED);
 		httpState->parse_state = WRITING_RESPONSE_BODY;
 		_info("Dumping mmap buffer.");
-		schedule_write(cli_state, httpState->file_map, 
+		clientScheduleWrite(cli_state, httpState->file_map, 
 			httpState->file_size);
 	} else if (httpState->parse_state == WRITING_RESPONSE_BODY) {
 		_info("Done writing response. Disconnecting...");
 		httpState->parse_state = RESPONSE_COMPLETED;
 		//We are done. Disconnect.
-		disconnect_client(state, cli_state);
+		serverDisconnect(state, cli_state);
 	}
 }
 
-void on_read_completed(ServerState *state, ClientState *cli_state) {
+void on_read_completed(Server *state, Client *cli_state) {
 	//If we are still parsing request, keep reading
 	HTTPState *httpState = (HTTPState*) cli_state->data;
 	if (httpState->parse_state < HEADER_READ_COMPLETED) {
 		_info("Still need to read header.");
-		int status = schedule_read(cli_state, httpState->io_buffer, 
+		int status = clientScheduleRead(cli_state, httpState->io_buffer, 
 			sizeof(httpState->io_buffer));
 		assert(status == 0);
 	}
 }
 
 int main() {
-	ServerState *state = new_server_state(9090);
+	Server *state = newServer(9090);
 
 	state->on_loop_start = init_server;
 	state->on_client_connect = on_connect;
@@ -186,7 +186,7 @@ int main() {
 	//state->on_write = on_write;
 	state->on_write_completed = on_write_completed;
 
-	start_server(state);
+	serverStart(state);
 
-	delete_server_state(state);
+	deleteServer(state);
 }
