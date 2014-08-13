@@ -24,6 +24,10 @@ on_read(Client *cstate, char *buff, int length) {
 
 int
 main(int argc, char **argv) {
+	if (argc < 2) {
+		puts("Usage: test_client host");
+		return 1;
+	}
 	Client *cstate = newClient(argv[1], 80);
 	if (cstate == NULL) {
 		return -1;
