@@ -16,6 +16,7 @@ typedef struct _Client {
 
 	int read_write_flag;
 	void *data;
+	int is_connected;
 
         void (*on_server_connect)(struct _Client* client_state);
         void (*on_server_disconnect)(struct _Client *client_state);

@@ -39,11 +39,17 @@ newClient(const char *host, int port) {
 	int sock = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
 	DIE(sock, "Failed to open socket.");
 
-	status = connect(sock, res->ai_addr, res->ai_addrlen);
-	DIE(status, "Failed to connect to port.");
-
 	status = fcntl(sock, F_SETFL, O_NONBLOCK);
 	DIE(status, "Failed to set non blocking mode for socket.");
+
+	status = connect(sock, res->ai_addr, res->ai_addrlen);
+	_info("Asynchronous connection initiated.");
+	if (status < 0 && errno != EINPROGRESS) {
+		perror("Failed to connect to port.");
+		close(sock);
+
+		return NULL;
+	}
 
 	freeaddrinfo(res);
 
@@ -171,7 +177,8 @@ clientLoop(Client *cstate) {
 		if (cstate->read_write_flag & RW_STATE_READ) {
 			FD_SET(cstate->fd, &readFdSet);
 		}
-		if (cstate->read_write_flag & RW_STATE_WRITE) {
+		if ((cstate->read_write_flag & RW_STATE_WRITE) ||
+			(cstate->is_connected == 0)) {
 			FD_SET(cstate->fd, &writeFdSet);
 		}
 
@@ -199,15 +206,32 @@ clientLoop(Client *cstate) {
 			}
 		}
 		if (FD_ISSET(cstate->fd, &writeFdSet)) {
-			int status = handle_server_read(cstate);
-			if (status < 1) {
-				_info("Server disconnected.");
-				if (cstate->on_server_disconnect) {
-					cstate->on_server_disconnect(cstate);
+			if (cstate->is_connected == 0) {
+				//Connection is complete. See if it worked
+				int valopt; 
+				socklen_t lon = sizeof(int); 
+				if (getsockopt(cstate->fd, SOL_SOCKET, SO_ERROR, (void*)(&valopt), &lon) < 0) { 
+					perror("Error in getsockopt()");
+					break;
 				}
-				close(cstate->fd);
-				cstate->fd = 0;
-				break;
+				//Check the value of valopt
+				if (valopt) {
+					printf("Error connecting to server: %s.\n", strerror(valopt));
+					break;
+				}
+				cstate->is_connected = 1;
+				_info("Asynchronous connection completed.");
+			} else {
+				int status = handle_server_read(cstate);
+				if (status < 1) {
+					_info("Server disconnected.");
+					if (cstate->on_server_disconnect) {
+						cstate->on_server_disconnect(cstate);
+					}
+					close(cstate->fd);
+					cstate->fd = 0;
+					break;
+				}
 			}
 		}
 	}
