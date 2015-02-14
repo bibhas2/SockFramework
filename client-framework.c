@@ -10,18 +10,29 @@
 #include <fcntl.h>
 #include "socket-framework.h"
 
-#define DIE(value, message) if (value < 0) {perror(message); exit(value);}
+#define DIE(value, message) if (value < 0) {perror(message); abort();}
 
 void _info(const char* fmt, ...);
 
 Client*
 newClient(const char *host, int port) {
 	Client *cstate = NULL;
-	_info("Connecting to %s:%d", host, port);
+
+	cstate = (Client*) calloc(1, sizeof(Client));
+	cstate->read_write_flag = RW_STATE_NONE;
+	strncpy(cstate->host, host, sizeof(cstate->host));
+	cstate->port = port;
+	cstate->fd = clientMakeConnection(cstate);;
+
+	return cstate;
+}
+
+int clientMakeConnection(Client *cstate) {
+	_info("Connecting to %s:%d", cstate->host, cstate->port);
 
 	char port_str[128];
 
-	snprintf(port_str, sizeof(port_str), "%d", port);
+	snprintf(port_str, sizeof(port_str), "%d", cstate->port);
 
 	struct addrinfo hints, *res;
 
@@ -29,10 +40,10 @@ newClient(const char *host, int port) {
 	hints.ai_family = PF_INET;
 	hints.ai_socktype = SOCK_STREAM;
 	_info("Resolving name...");
-	int status = getaddrinfo(host, port_str, &hints, &res);
+	int status = getaddrinfo(cstate->host, port_str, &hints, &res);
 	DIE(status, "Failed to resolve address.");
 	if (res == NULL) {
-		_info("Failed to resolve address: %s", host);
+		_info("Failed to resolve address: %s", cstate->host);
 		exit(-1);
 	}
 
@@ -48,16 +59,12 @@ newClient(const char *host, int port) {
 		perror("Failed to connect to port.");
 		close(sock);
 
-		return NULL;
+		return -1;
 	}
 
 	freeaddrinfo(res);
 
-	cstate = (Client*) calloc(1, sizeof(Client));
-	cstate->fd = sock;
-	cstate->read_write_flag = RW_STATE_NONE;
-
-	return cstate;
+	return sock;
 }
 
 void
@@ -196,12 +203,12 @@ clientLoop(Client *cstate) {
 		if (FD_ISSET(cstate->fd, &readFdSet)) {
 			int status = handle_server_write(cstate);
 			if (status < 1) {
+				close(cstate->fd);
+				cstate->fd = -1;
 				_info("Server disconnected.");
 				if (cstate->on_server_disconnect) {
 					cstate->on_server_disconnect(cstate);
 				}
-				close(cstate->fd);
-				cstate->fd = 0;
 				break;
 			}
 		}
@@ -225,18 +232,18 @@ clientLoop(Client *cstate) {
 				int status = handle_server_read(cstate);
 				if (status < 1) {
 					_info("Server disconnected.");
+					close(cstate->fd);
+					cstate->fd = -1;
 					if (cstate->on_server_disconnect) {
 						cstate->on_server_disconnect(cstate);
 					}
-					close(cstate->fd);
-					cstate->fd = 0;
 					break;
 				}
 			}
 		}
 	}
 
-	if (cstate->fd > 0) {
+	if (cstate->fd >= 0) {
 		close(cstate->fd);
 	}
 }
