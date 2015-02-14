@@ -2,6 +2,7 @@
 #include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
+#include <assert.h>
 #include <unistd.h>
 #include <sys/socket.h>
 #include <sys/time.h>
@@ -128,17 +129,26 @@ handle_server_read(Client *cli_state) {
 int
 handle_server_write(Client *cli_state) {
         if (!(cli_state->read_write_flag & RW_STATE_READ)) {
-                _info("Socket is not trying to read.");
+                //Socket is not trying to read. Possibly a
+		//server disconnect signal.
+		char ch;
+
+		int bytesRead = read(cli_state->fd,
+			&ch, sizeof(char));
+
+		if (bytesRead == 0) {
+			_info("Orderly disconnect detected.");
+		} else {
+			_info("Unexpected out of band incoming data.");
+			abort();
+		}
+
                 return -1;
         }
-        if (cli_state->read_buffer == NULL) {
-                _info("Read buffer not setup.");
-                return -1;
-        }
-        if (cli_state->read_length == cli_state->read_completed) {
-                _info("Read was already completed.");
-                return -1;
-        }
+	//Make sure read buffer is setup
+        assert(cli_state->read_buffer != NULL);
+	//Make sure read is pending
+        assert(cli_state->read_length > cli_state->read_completed);
 
         char *buffer_start = cli_state->read_buffer + cli_state->read_completed;
         int bytesRead = read(cli_state->fd,
@@ -184,9 +194,15 @@ clientLoop(Client *cstate) {
 		FD_ZERO(&readFdSet);
 		FD_ZERO(&writeFdSet);
 
-		if (cstate->read_write_flag & RW_STATE_READ) {
-			FD_SET(cstate->fd, &readFdSet);
-		}
+		/*
+		 * We need to enable read select no matter what
+		 * the value of read_write_flag is. This is 
+		 * because an orderly disconnect by the server
+		 * is signalled using a failed read and we need
+		 * to know that.
+		 */
+		FD_SET(cstate->fd, &readFdSet);
+
 		if ((cstate->read_write_flag & RW_STATE_WRITE) ||
 			(cstate->is_connected == 0)) {
 			FD_SET(cstate->fd, &writeFdSet);
