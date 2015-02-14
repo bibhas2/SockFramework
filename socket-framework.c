@@ -349,7 +349,7 @@ deleteServer(Server *state) {
 	free(state);
 }
 
-int clientScheduleRead(Client *cstate, char *buffer, int length) {
+int clientScheduleRead(Client *cstate, char *buffer, size_t length) {
 	if (cstate->fd <= 0) {
 		return -1;
 	}
@@ -366,7 +366,7 @@ int clientScheduleRead(Client *cstate, char *buffer, int length) {
 	return 0;
 }
 
-int clientScheduleWrite(Client *cstate, char *buffer, int length) {
+int clientScheduleWrite(Client *cstate, char *buffer, size_t length) {
 	if (cstate->fd <= 0) {
 		return -1;
 	}
