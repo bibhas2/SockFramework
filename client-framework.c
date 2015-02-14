@@ -22,7 +22,8 @@ newClient(const char *host, int port) {
 	cstate->read_write_flag = RW_STATE_NONE;
 	strncpy(cstate->host, host, sizeof(cstate->host));
 	cstate->port = port;
-	cstate->fd = clientMakeConnection(cstate);;
+
+	clientMakeConnection(cstate);;
 
 	return cstate;
 }
@@ -64,7 +65,9 @@ int clientMakeConnection(Client *cstate) {
 
 	freeaddrinfo(res);
 
-	return sock;
+	cstate->fd = sock;
+
+	return cstate->fd;
 }
 
 void
@@ -205,11 +208,12 @@ clientLoop(Client *cstate) {
 			if (status < 1) {
 				close(cstate->fd);
 				cstate->fd = -1;
-				_info("Server disconnected.");
+				cstate->is_connected = 0;
+				_info("Orderly server disconnect.");
 				if (cstate->on_server_disconnect) {
 					cstate->on_server_disconnect(cstate);
 				}
-				break;
+				continue;
 			}
 		}
 		if (FD_ISSET(cstate->fd, &writeFdSet)) {
@@ -231,9 +235,10 @@ clientLoop(Client *cstate) {
 			} else {
 				int status = handle_server_read(cstate);
 				if (status < 1) {
-					_info("Server disconnected.");
+					_info("Unexpected server disconnect.");
 					close(cstate->fd);
 					cstate->fd = -1;
+					cstate->is_connected = 0;
 					if (cstate->on_server_disconnect) {
 						cstate->on_server_disconnect(cstate);
 					}
