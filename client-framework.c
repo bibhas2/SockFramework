@@ -116,7 +116,8 @@ handle_server_read(Client *cli_state) {
                 cli_state->on_write(cli_state, buffer_start, bytesWritten);
         }
         if (cli_state->write_completed == cli_state->write_length) {
-                cli_state->read_write_flag &= ~RW_STATE_WRITE;
+                //Write is completed. Cancel further write.
+		clientCancelWrite(cli_state);
 
                 if (cli_state->on_write_completed) {
                         cli_state->on_write_completed(cli_state);
@@ -171,12 +172,16 @@ handle_server_write(Client *cli_state) {
         }
 
         cli_state->read_completed += bytesRead;
+	
+	int read_finished = cli_state->read_completed == cli_state->read_length;
 
         if (cli_state->on_read) {
                 cli_state->on_read(cli_state, buffer_start, bytesRead);
         }
-        if (cli_state->read_completed == cli_state->read_length) {
-                cli_state->read_write_flag = cli_state->read_write_flag & (~RW_STATE_READ);
+        if (read_finished) {
+                //Read is completed. Cancel further read.
+		clientCancelRead(cli_state);
+
                 if (cli_state->on_read_completed) {
                         cli_state->on_read_completed(cli_state);
                 }
