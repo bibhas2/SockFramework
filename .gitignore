@@ -1,2 +1,3 @@
 *.o
-test-server
+*.a
+test-client test-server-file test-server-mmap
