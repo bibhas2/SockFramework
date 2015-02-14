@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdarg.h>
 #include <stdlib.h>
+#include <assert.h>
 #include <unistd.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -350,36 +351,30 @@ deleteServer(Server *state) {
 }
 
 int clientScheduleRead(Client *cstate, char *buffer, size_t length) {
-	if (cstate->fd <= 0) {
-		return -1;
-	}
-	if (cstate->read_write_flag & RW_STATE_READ) {
-		//Already reading!
-		return -2;
-	}
+	assert(cstate->fd >= 0); //Bad socket?
+	assert((cstate->read_write_flag & RW_STATE_READ)
+		== 0); //Already reading?
+
 	cstate->read_buffer = buffer;
 	cstate->read_length = length;
 	cstate->read_completed = 0;
 	cstate->read_write_flag |= RW_STATE_READ;
 
-	_info("Scheduling read: %d", cstate->read_write_flag);
+	_info("Scheduling read for socket: %d", cstate->fd);
 	return 0;
 }
 
 int clientScheduleWrite(Client *cstate, char *buffer, size_t length) {
-	if (cstate->fd <= 0) {
-		return -1;
-	}
-	if (cstate->read_write_flag & RW_STATE_WRITE) {
-		//Already writing
-		return -2;
-	}
+	assert(cstate->fd >= 0); //Bad socket?
+	assert((cstate->read_write_flag & RW_STATE_WRITE)
+		== 0); //Already writing?
+
 	cstate->write_buffer = buffer;
 	cstate->write_length = length;
 	cstate->write_completed = 0;
 	cstate->read_write_flag |= RW_STATE_WRITE;
 
-	_info("Scheduling write: %d", cstate->read_write_flag);
+	_info("Scheduling write for socket: %d", cstate->fd);
 	return 0;
 }
 
@@ -388,11 +383,12 @@ void clientCancelRead(Client *cstate) {
 	cstate->read_length = 0;
 	cstate->read_completed = 0;
 	cstate->read_write_flag &= ~RW_STATE_READ;
-	_info("Cancel read: %d", cstate->read_write_flag);
+	_info("Cancel read for socket: %d", cstate->fd);
 }
 void clientCancelWrite(Client *cstate) {
 	cstate->write_buffer = NULL;
 	cstate->write_length = 0;
 	cstate->write_completed = 0;
 	cstate->read_write_flag &= ~RW_STATE_WRITE;
+	_info("Cancel write for socket: %d", cstate->fd);
 }
