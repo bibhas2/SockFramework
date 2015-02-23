@@ -104,7 +104,15 @@ static void pump_loop(EventPump *pump) {
 			}
 			if (FD_ISSET(rec->socket, &readFdSet)) {
 				_info("Socket readable: %d\n", rec->socket);
-				if (rec->onReadable != NULL) {
+				if (rec->onAccept != NULL) {
+					int sock = accept(rec->socket, 
+						NULL, NULL);
+					DIE(sock, "accept() failed.");
+					int status = fcntl(sock, 
+						F_SETFL, O_NONBLOCK);
+					DIE(status, "Failed to set non blocking mode for client socket.");
+					rec->onAccept(pump, rec, sock);
+				} else if (rec->onReadable != NULL) {
 					rec->onReadable(pump, rec);
 				}
 			}
@@ -121,6 +129,7 @@ static void clear_sockets(EventPump *pump) {
 		rec->socket = -1;
 		rec->data = NULL;
 		rec->onReadable = NULL;
+		rec->onAccept = NULL;
 		rec->onWritable = NULL;
 		rec->onTimeout = NULL;
 		rec->onConnect = NULL;
@@ -183,6 +192,7 @@ void *pumpRemoveSocket(EventPump *pump, int socket) {
 	rec->socket = -1;
 	rec->data = NULL;
 	rec->onReadable = NULL;
+	rec->onAccept = NULL;
 	rec->onWritable = NULL;
 	rec->onTimeout = NULL;
 	rec->onConnect = NULL;

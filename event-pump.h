@@ -8,6 +8,8 @@ struct _EventPump;
 typedef struct _SocketRec {
 	int socket;
 	void *data;
+	void (*onAccept)
+		(struct _EventPump *pump, struct _SocketRec *rec, int accepted_socket);
 	void (*onConnect)
 		(struct _EventPump *pump, struct _SocketRec *rec, int status);
 	void (*onReadable)
