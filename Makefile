@@ -1,10 +1,10 @@
 CC=gcc
 CFLAGS=-std=c99
-OBJS=socket-framework.o client-framework.o
+OBJS=socket-framework.o client-framework.o event-pump.o
 
 all: libsockf.a test-server-mmap test-server-file test-client
 
-%.o: %.c socket-framework.h client-framework.h
+%.o: %.c socket-framework.h client-framework.h event-pump.h
 	$(CC) $(CFLAGS) -c -o $@ $<
 libsockf.a: $(OBJS)
 	ar rcs libsockf.a $(OBJS)

@@ -1,52 +1,122 @@
 #include <stdio.h>
+#include <stdarg.h>
+#include <stdlib.h>
 #include <string.h>
+#include <assert.h>
+#include <unistd.h>
+#include <sys/socket.h>
+#include <sys/time.h>
+#include <netdb.h>
+#include <errno.h>
+#include <fcntl.h>
 
-#include "socket-framework.h"
+#include "event-pump.h"
 
-char read_buff[128], write_buff[128];
+#define DIE(value, message) if (value < 0) {perror(message); abort();}
 
-void
-on_write_completed(Client *cstate) {
-	clientScheduleRead(cstate, read_buff, sizeof(read_buff) - 1);
-}
+#define _info printf("INFO: "); printf
 
-void
-on_read_completed(Client *cstate) {
-	clientScheduleRead(cstate, read_buff, sizeof(read_buff) - 1);
-}
+char req[1024];
 
-void
-on_read(Client *cstate, char *buff, int length) {
-	buff[length] = '\0';
+static void onReadable(EventPump *pump, SocketRec *rec) {
+	char buff[256];
 
-	printf("%s", buff);
-}
+	int len = read(rec->socket, buff, sizeof(buff));
 
-int
-main(int argc, char **argv) {
-	if (argc < 2) {
-		puts("Usage: test_client host");
-		return 1;
+	if (len == 0) {
+		//Orderly disconnect
+		pumpStop(pump);
+
+		return;
 	}
-	Client *cstate = newClient(argv[1], 80);
-	if (cstate == NULL) {
+	printf("%.*s", len, buff);
+}
+
+static void onWritable(EventPump *pump, SocketRec *rec) {
+	//Write the request
+	puts(req);
+	int status = write(rec->socket, req, strlen(req));
+
+	assert(status > 0);
+
+	rec->onWritable = NULL;
+}
+
+static void onConnect(EventPump *pump, SocketRec *rec, int status) {
+	assert(status == 1);
+
+	rec->onWritable = onWritable;
+}
+
+static void onTimeout(EventPump *pump, SocketRec *rec) {
+	close(rec->socket);
+	pumpStop(pump);
+}
+
+int make_connection(const char *host, const char *port) {
+	_info("Connecting to %s:%s", host, port);
+
+	struct addrinfo hints, *res;
+
+	memset(&hints, 0, sizeof(hints));
+	hints.ai_family = PF_INET;
+	hints.ai_socktype = SOCK_STREAM;
+	_info("Resolving name...");
+	int status = getaddrinfo(host, port, &hints, &res);
+	DIE(status, "Failed to resolve address.");
+	if (res == NULL) {
+		_info("Failed to resolve address: %s", host);
+		abort();
+	}
+
+	int sock = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
+	DIE(sock, "Failed to open socket.");
+
+	status = fcntl(sock, F_SETFL, O_NONBLOCK);
+	DIE(status, "Failed to set non blocking mode for socket.");
+
+	status = connect(sock, res->ai_addr, res->ai_addrlen);
+	freeaddrinfo(res);
+
+	_info("Asynchronous connection initiated.");
+	if (status < 0 && errno != EINPROGRESS) {
+		perror("Failed to connect to port.");
+		close(sock);
+
 		return -1;
 	}
 
-	cstate->on_write_completed = on_write_completed;
-	cstate->on_read_completed = on_read_completed;
-	cstate->on_read = on_read;
+	return sock;
+}
 
-        char *req = "GET / HTTP/1.1\r\n"
-                "Host: *\r\n"
+int main(int argc, char **argv) {
+	if (argc < 4) {
+		puts("Usage: test_client host port path");
+		return 1;
+	}
+
+	const char *host = argv[1];
+	const char *port = argv[2];
+	const char *path = argv[3];
+
+        char *fmt = "GET %s HTTP/1.1\r\n"
+                "Host: %s:%s\r\n"
                 "Accept: */*\r\n"
                 "\r\n";
+	snprintf(req, sizeof(req), fmt, path, host, port);
 
-	clientScheduleWrite(cstate, req, strlen(req));
+	EventPump *pump = newEventPump();
+	int sock = make_connection(host, port);
+	SocketRec *rec = pumpRegisterSocket(pump,
+		sock, req);
+	rec->onConnect = onConnect;
+	rec->onReadable = onReadable;
+	rec->onWritable = NULL;
+	rec->onTimeout = onTimeout;
 
-	clientLoop(cstate);
+	pumpStart(pump);
 
-	deleteClient(cstate);
+	deleteEventPump(pump);
 
 	return 0;
 }

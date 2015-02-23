@@ -13,11 +13,22 @@
 
 #define DIE(value, message) if (value < 0) {perror(message); abort();}
 
-#ifdef DEBUG
 #define _info printf("INFO: "); printf
-#else
-#define _info //
-#endif
+
+static int check_connect_status(int fd) {
+	int valopt;
+	socklen_t lon = sizeof(int);
+	int result = getsockopt(fd, SOL_SOCKET, SO_ERROR, 
+		(void*)(&valopt), &lon); 
+	DIE(result, "Error in getsockopt()");
+	//Check the value of valopt
+	if (valopt) {
+		_info("Error connecting to server: %s.\n", strerror(valopt));
+		return 0;
+	}
+
+	return 1;
+}
 
 static void pump_loop(EventPump *pump) {
         fd_set readFdSet, writeFdSet;
@@ -40,7 +51,7 @@ static void pump_loop(EventPump *pump) {
 			}
 
 			FD_SET(rec->socket, &readFdSet);
-			if (rec->needToWrite) {
+			if (rec->onWritable != NULL || rec->onConnect != NULL) {
 				FD_SET(rec->socket, &writeFdSet);
 			}
 
@@ -77,21 +88,24 @@ static void pump_loop(EventPump *pump) {
 			if (rec->socket < 0) {
 				continue;
 			}
-			if (FD_ISSET(rec->socket, &readFdSet)) {
-				_info("Socket readable: %d\n", rec->socket);
-				if (rec->onReadable != NULL) {
-					rec->onReadable(pump, rec);
+			if (FD_ISSET(rec->socket, &writeFdSet)) {
+				_info("Socket writable: %d\n", rec->socket);
+				if (rec->onConnect != NULL) {
+					rec->onConnect(pump, rec, 
+						check_connect_status(rec->socket));
+					rec->onConnect = NULL;
+				} else if (rec->onWritable != NULL) {
+					rec->onWritable(pump, rec);
 				}
 			}
 			//Is socket removed?
 			if (rec->socket < 0) {
 				continue;
 			}
-
-			if (FD_ISSET(rec->socket, &writeFdSet)) {
-				_info("Socket writable: %d\n", rec->socket);
-				if (rec->onWritable != NULL) {
-					rec->onWritable(pump, rec);
+			if (FD_ISSET(rec->socket, &readFdSet)) {
+				_info("Socket readable: %d\n", rec->socket);
+				if (rec->onReadable != NULL) {
+					rec->onReadable(pump, rec);
 				}
 			}
 		}
@@ -100,7 +114,7 @@ static void pump_loop(EventPump *pump) {
 	pump->status = PUMP_STATUS_STOPPED;
 }
 
-void clear_sockets(EventPump *pump) {
+static void clear_sockets(EventPump *pump) {
 	for (int i = 0; i < PUMP_MAX_SOCKET; ++i) {
 		SocketRec *rec = pump->sockets + i;
 
@@ -109,7 +123,7 @@ void clear_sockets(EventPump *pump) {
 		rec->onReadable = NULL;
 		rec->onWritable = NULL;
 		rec->onTimeout = NULL;
-		rec->needToWrite = 0;
+		rec->onConnect = NULL;
 	}
 }
 
@@ -171,7 +185,7 @@ void *pumpRemoveSocket(EventPump *pump, int socket) {
 	rec->onReadable = NULL;
 	rec->onWritable = NULL;
 	rec->onTimeout = NULL;
-	rec->needToWrite = 0;
+	rec->onConnect = NULL;
 
 	return data;
 }

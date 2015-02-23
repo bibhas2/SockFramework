@@ -7,14 +7,15 @@ struct _EventPump;
 
 typedef struct _SocketRec {
 	int socket;
-	int needToWrite;
 	void *data;
+	void (*onConnect)
+		(struct _EventPump *pump, struct _SocketRec *rec, int status);
 	void (*onReadable)
-		(struct _EventPump *pump, struct _SocketRec *repeater);
+		(struct _EventPump *pump, struct _SocketRec *rec);
 	void (*onWritable)
-		(struct _EventPump *pump, struct _SocketRec *repeater);
+		(struct _EventPump *pump, struct _SocketRec *rec);
 	void (*onTimeout)
-		(struct _EventPump *pump, struct _SocketRec *repeater);
+		(struct _EventPump *pump, struct _SocketRec *rec);
 } SocketRec;
 
 typedef struct _EventPump {
