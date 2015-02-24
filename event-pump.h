@@ -8,16 +8,17 @@ struct _EventPump;
 typedef struct _SocketRec {
 	int socket;
 	void *data;
+	struct _EventPump *pump;
 	void (*onAccept)
-		(struct _EventPump *pump, struct _SocketRec *rec, int accepted_socket);
+		(struct _SocketRec *rec, int accepted_socket);
 	void (*onConnect)
-		(struct _EventPump *pump, struct _SocketRec *rec, int status);
+		(struct _SocketRec *rec, int status);
 	void (*onReadable)
-		(struct _EventPump *pump, struct _SocketRec *rec);
+		(struct _SocketRec *rec);
 	void (*onWritable)
-		(struct _EventPump *pump, struct _SocketRec *rec);
+		(struct _SocketRec *rec);
 	void (*onTimeout)
-		(struct _EventPump *pump, struct _SocketRec *rec);
+		(struct _SocketRec *rec);
 } SocketRec;
 
 typedef struct _EventPump {

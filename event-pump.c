@@ -13,7 +13,11 @@
 
 #define DIE(value, message) if (value < 0) {perror(message); abort();}
 
+#if DEBUG
 #define _info printf("INFO: "); printf
+#else
+#define _info //
+#endif
 
 static int check_connect_status(int fd) {
 	int valopt;
@@ -76,7 +80,7 @@ static void pump_loop(EventPump *pump) {
 					continue;
 				}
 				if (rec->onTimeout != NULL) {
-					rec->onTimeout(pump, rec);
+					rec->onTimeout(rec);
 				}
 			}
                 }
@@ -91,11 +95,11 @@ static void pump_loop(EventPump *pump) {
 			if (FD_ISSET(rec->socket, &writeFdSet)) {
 				_info("Socket writable: %d\n", rec->socket);
 				if (rec->onConnect != NULL) {
-					rec->onConnect(pump, rec, 
+					rec->onConnect(rec, 
 						check_connect_status(rec->socket));
 					rec->onConnect = NULL;
 				} else if (rec->onWritable != NULL) {
-					rec->onWritable(pump, rec);
+					rec->onWritable(rec);
 				}
 			}
 			//Is socket removed?
@@ -111,9 +115,9 @@ static void pump_loop(EventPump *pump) {
 					int status = fcntl(sock, 
 						F_SETFL, O_NONBLOCK);
 					DIE(status, "Failed to set non blocking mode for client socket.");
-					rec->onAccept(pump, rec, sock);
+					rec->onAccept(rec, sock);
 				} else if (rec->onReadable != NULL) {
-					rec->onReadable(pump, rec);
+					rec->onReadable(rec);
 				}
 			}
 		}
@@ -122,17 +126,22 @@ static void pump_loop(EventPump *pump) {
 	pump->status = PUMP_STATUS_STOPPED;
 }
 
-static void clear_sockets(EventPump *pump) {
+static void clear_socket(SocketRec *rec) {
+	rec->socket = -1;
+	rec->data = NULL;
+	rec->onReadable = NULL;
+	rec->onAccept = NULL;
+	rec->onWritable = NULL;
+	rec->onTimeout = NULL;
+	rec->onConnect = NULL;
+}
+
+static void reset_sockets(EventPump *pump) {
 	for (int i = 0; i < PUMP_MAX_SOCKET; ++i) {
 		SocketRec *rec = pump->sockets + i;
 
-		rec->socket = -1;
-		rec->data = NULL;
-		rec->onReadable = NULL;
-		rec->onAccept = NULL;
-		rec->onWritable = NULL;
-		rec->onTimeout = NULL;
-		rec->onConnect = NULL;
+		clear_socket(rec);
+		rec->pump = pump;
 	}
 }
 
@@ -140,7 +149,7 @@ EventPump *newEventPump() {
 	EventPump *pump = calloc(1, sizeof(EventPump));
 	assert(pump != NULL);
 
-	clear_sockets(pump);
+	reset_sockets(pump);
 
 	pump->timeout = 10; //Seconds
 
@@ -159,13 +168,13 @@ int pumpStop(EventPump *pump) {
 	assert(pump->status == PUMP_STATUS_RUNNING);
 
 	pump->status = PUMP_STATUS_STOP_REQUESTED;
-	clear_sockets(pump);
+	reset_sockets(pump);
 
 	return 1;
 }
 
 void deleteEventPump(EventPump *pump) {
-	clear_sockets(pump);
+	reset_sockets(pump);
 	free(pump);
 }
 
@@ -189,13 +198,7 @@ void *pumpRemoveSocket(EventPump *pump, int socket) {
 
 	void *data = rec->data;
 
-	rec->socket = -1;
-	rec->data = NULL;
-	rec->onReadable = NULL;
-	rec->onAccept = NULL;
-	rec->onWritable = NULL;
-	rec->onTimeout = NULL;
-	rec->onConnect = NULL;
+	clear_socket(rec);
 
 	return data;
 }
