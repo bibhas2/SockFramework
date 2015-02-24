@@ -1,5 +1,5 @@
 CC=gcc
-CFLAGS=-std=c99
+CFLAGS=-std=c99 -g
 OBJS=socket-framework.o client-framework.o event-pump.o
 
 all: libsockf.a test-server-mmap test-server-file test-client
@@ -13,6 +13,6 @@ test-server-mmap: $(OBJS) test-server-mmap.o
 test-server-file: $(OBJS) test-server-file.o
 	gcc -o test-server-file test-server-file.o -L. -lsockf
 test-client: $(OBJS) test-client.o
-	gcc -o test-client test-client.o -L. -lsockf
+	gcc -o test-client test-client.o ../http-parser/libhttp_parser.o -L../Cute -L. -lsockf -lcute
 clean:
 	rm $(OBJS) test-client test-server-mmap test-server-file libsockf.a

@@ -1,3 +1,5 @@
+#include "../Cute/List.h"
+
 #define PUMP_MAX_SOCKET 128
 #define PUMP_STATUS_STOPPED 0
 #define PUMP_STATUS_RUNNING 1
@@ -25,7 +27,7 @@ typedef struct _EventPump {
 	int status;
 	time_t timeout;
 	int control_pipe[2];
-	SocketRec sockets[PUMP_MAX_SOCKET];
+	List *sockets;
 } EventPump;
 
 EventPump *newEventPump();

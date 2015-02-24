@@ -13,6 +13,8 @@
 
 #define DIE(value, message) if (value < 0) {perror(message); abort();}
 
+#define DEBUG 1
+
 #if DEBUG
 #define _info printf("INFO: "); printf
 #else
@@ -47,23 +49,20 @@ static void pump_loop(EventPump *pump) {
 		//Setup the set
 		int highest_socket = -1;
 
-		for (int i = 0; i < PUMP_MAX_SOCKET; ++i) {
-			SocketRec *rec = pump->sockets + i;
-
-			if (rec->socket < 0) {
-				continue;
-			}
+		for (ListNode *n = pump->sockets->first; n != NULL; 
+			n = n->next) {
+			SocketRec *rec = n->data;
+			assert(rec->socket >= 0);
 
 			FD_SET(rec->socket, &readFdSet);
+
 			if (rec->onWritable != NULL || rec->onConnect != NULL) {
 				FD_SET(rec->socket, &writeFdSet);
 			}
 
-			highest_socket = rec->socket;
+			highest_socket = rec->socket > highest_socket ?
+				rec->socket : highest_socket;
 		}
-
-		//For now
-		assert(highest_socket >= 0);
 
                 timeout.tv_sec = pump->timeout;
                 timeout.tv_usec = 0;
@@ -73,25 +72,23 @@ static void pump_loop(EventPump *pump) {
 		if (numEvents == 0) {
 			_info("select() timed out.\n");
 
-			for (int i = 0; i < PUMP_MAX_SOCKET; ++i) {
-				SocketRec *rec = pump->sockets + i;
+			for (ListNode *n = pump->sockets->first; n != NULL;) {
+				SocketRec *rec = n->data;
+				n = n->next;
 
-				if (rec->socket < 0) {
-					continue;
-				}
 				if (rec->onTimeout != NULL) {
 					rec->onTimeout(rec);
 				}
 			}
+
+			continue; //Timeout
                 }
 
 		//Dispatch
-		for (int i = 0; i < PUMP_MAX_SOCKET; ++i) {
-			SocketRec *rec = pump->sockets + i;
+		for (ListNode *n = pump->sockets->first; n != NULL;) {
+			SocketRec *rec = n->data;
+			n = n->next;
 
-			if (rec->socket < 0) {
-				continue;
-			}
 			if (FD_ISSET(rec->socket, &writeFdSet)) {
 				_info("Socket writable: %d\n", rec->socket);
 				if (rec->onConnect != NULL) {
@@ -126,7 +123,10 @@ static void pump_loop(EventPump *pump) {
 	pump->status = PUMP_STATUS_STOPPED;
 }
 
-static void clear_socket(SocketRec *rec) {
+static SocketRec *newSocketRec() {
+	SocketRec *rec = malloc(sizeof(SocketRec));
+	assert(rec != NULL);
+
 	rec->socket = -1;
 	rec->data = NULL;
 	rec->onReadable = NULL;
@@ -134,14 +134,23 @@ static void clear_socket(SocketRec *rec) {
 	rec->onWritable = NULL;
 	rec->onTimeout = NULL;
 	rec->onConnect = NULL;
+
+	return rec;
 }
 
-static void reset_sockets(EventPump *pump) {
-	for (int i = 0; i < PUMP_MAX_SOCKET; ++i) {
-		SocketRec *rec = pump->sockets + i;
+static void deleteSocketRec(SocketRec *rec) {
+	rec->socket = -1;
+	rec->data = NULL;
 
-		clear_socket(rec);
-		rec->pump = pump;
+	free(rec);
+}
+
+static void clear_sockets(EventPump *pump) {
+	while (pump->sockets->first != NULL) {
+		SocketRec *rec = pump->sockets->first->data;
+
+		deleteSocketRec(rec);
+		listRemoveNode(pump->sockets, pump->sockets->first);
 	}
 }
 
@@ -149,7 +158,7 @@ EventPump *newEventPump() {
 	EventPump *pump = calloc(1, sizeof(EventPump));
 	assert(pump != NULL);
 
-	reset_sockets(pump);
+	pump->sockets = newList();
 
 	pump->timeout = 10; //Seconds
 
@@ -168,37 +177,45 @@ int pumpStop(EventPump *pump) {
 	assert(pump->status == PUMP_STATUS_RUNNING);
 
 	pump->status = PUMP_STATUS_STOP_REQUESTED;
-	reset_sockets(pump);
+	clear_sockets(pump);
 
 	return 1;
 }
 
 void deleteEventPump(EventPump *pump) {
-	reset_sockets(pump);
+	clear_sockets(pump);
+	deleteList(pump->sockets);
 	free(pump);
 }
 
 SocketRec *pumpRegisterSocket(EventPump *pump, int socket, void *data) {
-	assert(socket >= 0 && socket < PUMP_MAX_SOCKET);
-
-	SocketRec *rec = pump->sockets + socket;
-	assert(rec->socket < 0); //Make sure its free
+	SocketRec *rec = newSocketRec();
 
 	rec->socket = socket;
 	rec->data = data;
+	rec->pump = pump;
+
+	listAddLast(pump->sockets, rec);
 
 	return rec;
 }
 
 void *pumpRemoveSocket(EventPump *pump, int socket) {
-	assert(socket >= 0 && socket < PUMP_MAX_SOCKET);
+	void *data = NULL;
 
-	SocketRec *rec = pump->sockets + socket;
-	assert(rec->socket >= 0); //Make sure its in use
+	for (ListNode *n = pump->sockets->first; n != NULL; n = n->next) {
+		SocketRec *rec = n->data;
 
-	void *data = rec->data;
+		if (rec->socket == socket) {
+			listRemoveNode(pump->sockets, n);
+			deleteSocketRec(rec);
+			data = rec->data;
 
-	clear_socket(rec);
+			break;
+		}
+	}
+	_info("pumpRemoveSocket received invalid socket.");
+	abort();
 
 	return data;
 }
