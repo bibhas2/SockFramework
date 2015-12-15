@@ -24,11 +24,25 @@ _info(const char* fmt, ...) {
         printf("\n");
 }
 
+static void reset_client(Client *cstate) {
+  _info("Resetting client: %d", cstate->fd);
+
+  cstate->fd = -1;
+  cstate->data = NULL;
+  cstate->read_write_flag = RW_STATE_NONE;
+  cstate->read_buffer = NULL;
+  cstate->read_length = 0;
+  cstate->read_completed = 0;
+  cstate->write_buffer = NULL;
+  cstate->write_length = 0;
+  cstate->write_completed = 0;
+}
+
 void
 populate_fd_set(Server *state, fd_set *pReadFdSet, fd_set *pWriteFdSet) {
 	FD_ZERO(pReadFdSet);
 	FD_ZERO(pWriteFdSet);
-	
+
 	//Set the server socket
 	FD_SET(state->server_socket, pReadFdSet);
 
@@ -36,13 +50,14 @@ populate_fd_set(Server *state, fd_set *pReadFdSet, fd_set *pWriteFdSet) {
 	for (int i = 0; i < MAX_CLIENTS; ++i) {
 		int fd = state->client_state[i].fd;
 
-		if (fd == 0) {
+		if (fd < 0) {
 			continue;
 		}
 
 		if (state->client_state[i].read_write_flag & RW_STATE_READ) {
 			FD_SET(fd, pReadFdSet);
-		} else if (state->client_state[i].read_write_flag & RW_STATE_WRITE) {
+		}
+    if (state->client_state[i].read_write_flag & RW_STATE_WRITE) {
 			FD_SET(fd, pWriteFdSet);
 		}
 	}
@@ -53,11 +68,9 @@ disconnect_clients(Server *state) {
 	for (int i = 0; i < MAX_CLIENTS; ++i) {
 		int fd = state->client_state[i].fd;
 
-		if (fd != 0) {
+		if (fd >= 0) {
 			close(fd);
-			state->client_state[i].fd = 0;
-			state->client_state[i].data = NULL;
-			state->client_state[i].read_write_flag = RW_STATE_NONE;
+      reset_client(state->client_state + i);
 		}
 	}
 }
@@ -65,7 +78,7 @@ disconnect_clients(Server *state) {
 int
 add_client_fd(Server *state, int fd) {
 	for (int i = 0; i < MAX_CLIENTS; ++i) {
-		if (state->client_state[i].fd == 0) {
+		if (state->client_state[i].fd < 0) {
 			//We have a free slot
 			Client *cstate = state->client_state + i;
 
@@ -91,17 +104,10 @@ remove_client_fd(Server *state, int fd) {
 	for (int i = 0; i < MAX_CLIENTS; ++i) {
 		if (state->client_state[i].fd == fd) {
 			//We found it!
+
 			Client *cstate = state->client_state + i;
 
-			cstate->fd = fd;
-			cstate->data = NULL;
-			cstate->read_write_flag = RW_STATE_NONE;
-			cstate->read_buffer = NULL;
-			cstate->read_length = 0;
-			cstate->read_completed = 0;
-			cstate->write_buffer = NULL;
-			cstate->write_length = 0;
-			cstate->write_completed = 0;
+      reset_client(cstate);
 
 			return i;
 		}
@@ -114,20 +120,23 @@ int
 handle_client_write(Server* state, Client *cli_state) {
 	if (!(cli_state->read_write_flag & RW_STATE_READ)) {
 		_info("Socket is not trying to read.");
+
 		return -1;
 	}
 	if (cli_state->read_buffer == NULL) {
 		_info("Read buffer not setup.");
+
 		return -1;
 	}
 	if (cli_state->read_length == cli_state->read_completed) {
 		_info("Read was already completed.");
+
 		return -1;
 	}
 
 	char *buffer_start = cli_state->read_buffer + cli_state->read_completed;
-	int bytesRead = read(cli_state->fd, 
-		buffer_start, 
+	int bytesRead = read(cli_state->fd,
+		buffer_start,
 		cli_state->read_length - cli_state->read_completed);
 
 	_info("Read %d of %d bytes", bytesRead, cli_state->read_length);
@@ -144,7 +153,7 @@ handle_client_write(Server* state, Client *cli_state) {
 		//Client has disconnected. We convert that to an error.
 		return -1;
 	}
-	
+
 	cli_state->read_completed += bytesRead;
 
 	if (state->on_read) {
@@ -165,22 +174,27 @@ int
 handle_client_read(Server* state, Client *cli_state) {
 	if (!(cli_state->read_write_flag & RW_STATE_WRITE)) {
 		_info("Socket is not trying to write.");
+
 		return -1;
 	}
 	if (cli_state->write_buffer == NULL) {
 		_info("Write buffer not setup.");
+
 		return -1;
 	}
 	if (cli_state->write_length == cli_state->write_completed) {
 		_info("Write was already completed.");
+
 		return -1;
 	}
 
 	char *buffer_start = cli_state->write_buffer + cli_state->write_completed;
-	int bytesWritten = write(cli_state->fd, 
-		buffer_start, 
+	int bytesWritten = write(cli_state->fd,
+		buffer_start,
 		cli_state->write_length - cli_state->write_completed);
+
 	_info("Written %d of %d bytes", bytesWritten, cli_state->write_length);
+
 	if (bytesWritten < 0) {
 		if (errno != EAGAIN && errno != EWOULDBLOCK) {
 			return -1;
@@ -194,12 +208,13 @@ handle_client_read(Server* state, Client *cli_state) {
 		//Client has disconnected. We convert that to an error.
 		return -1;
 	}
-	
+
 	cli_state->write_completed += bytesWritten;
 
 	if (state->on_write) {
 		state->on_write(state, cli_state, buffer_start, bytesWritten);
 	}
+
 	if (cli_state->write_completed == cli_state->write_length) {
 		cli_state->read_write_flag &= ~RW_STATE_WRITE;
 
@@ -244,7 +259,7 @@ server_loop(Server *state) {
 
 			break;
 		}
-		
+
 		//Make sense out of the event
 		if (FD_ISSET(state->server_socket, &readFdSet)) {
 			_info("Client is connecting...");
@@ -269,6 +284,12 @@ server_loop(Server *state) {
 		} else {
 			//Client wrote something or disconnected
 			for (int i = 0; i < MAX_CLIENTS; ++i) {
+
+        if (state->client_state[i].fd < 0) {
+          //This slot is not in use
+          continue;
+        }
+
 				if (FD_ISSET(state->client_state[i].fd, &readFdSet)) {
 					Client *cli_state = state->client_state + i;
 					int status = handle_client_write(state, cli_state);
@@ -281,6 +302,7 @@ server_loop(Server *state) {
 						remove_client_fd(state, cli_state->fd);
 					}
 				}
+
 				if (FD_ISSET(state->client_state[i].fd, &writeFdSet)) {
 					Client *cli_state = state->client_state + i;
 					int status = handle_client_read(state, cli_state);
@@ -342,6 +364,12 @@ Server* newServer(int port) {
 
 	state->port = port;
 
+  for (int i = 0; i < MAX_CLIENTS; ++i) {
+			Client *cstate = state->client_state + i;
+
+      reset_client(cstate);
+	}
+
 	return state;
 }
 
@@ -352,8 +380,7 @@ deleteServer(Server *state) {
 
 int clientScheduleRead(Client *cstate, char *buffer, size_t length) {
 	assert(cstate->fd >= 0); //Bad socket?
-	assert((cstate->read_write_flag & RW_STATE_READ)
-		== 0); //Already reading?
+	assert((cstate->read_write_flag & RW_STATE_READ) == 0); //Already reading?
 
 	cstate->read_buffer = buffer;
 	cstate->read_length = length;
@@ -366,8 +393,7 @@ int clientScheduleRead(Client *cstate, char *buffer, size_t length) {
 
 int clientScheduleWrite(Client *cstate, char *buffer, size_t length) {
 	assert(cstate->fd >= 0); //Bad socket?
-	assert((cstate->read_write_flag & RW_STATE_WRITE)
-		== 0); //Already writing?
+	assert((cstate->read_write_flag & RW_STATE_WRITE) == 0); //Already writing?
 
 	cstate->write_buffer = buffer;
 	cstate->write_length = length;
