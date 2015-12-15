@@ -248,10 +248,16 @@ server_loop(Server *state) {
 	while (1) {
 		populate_fd_set(state, &readFdSet, &writeFdSet);
 
-		timeout.tv_sec = 10;
+		timeout.tv_sec = state->idle_timeout;
 		timeout.tv_usec = 0;
 
-		int numEvents = select(FD_SETSIZE, &readFdSet, &writeFdSet, NULL, &timeout);
+		int numEvents = select(
+      FD_SETSIZE,
+      &readFdSet,
+      &writeFdSet,
+      NULL,
+      state->idle_timeout > 0 ? &timeout : NULL);
+
 		DIE(numEvents, "select() failed.");
 
 		if (numEvents == 0) {
@@ -363,7 +369,8 @@ Server* newServer(int port) {
 	Server *state = (Server*) calloc(1, sizeof(Server));
 
 	state->port = port;
-
+  state->idle_timeout = -1;
+  
   for (int i = 0; i < MAX_CLIENTS; ++i) {
 			Client *cstate = state->client_state + i;
 

@@ -33,6 +33,7 @@ typedef struct _Server {
 	Client client_state[MAX_CLIENTS];
 	int port;
 	int server_socket;
+	int idle_timeout; //Timeout in seconds. -1 for no timeout.
 
 	void (*on_loop_start)(struct _Server* state);
 	void (*on_loop_end)(struct _Server* state);
