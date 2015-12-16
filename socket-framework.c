@@ -309,6 +309,11 @@ server_loop(Server *state) {
 					}
 				}
 
+        if (state->client_state[i].fd < 0) {
+          //Client write event caused application to disconnect.
+          continue;
+        }
+
 				if (FD_ISSET(state->client_state[i].fd, &writeFdSet)) {
 					Client *cli_state = state->client_state + i;
 					int status = handle_client_read(state, cli_state);
@@ -370,7 +375,7 @@ Server* newServer(int port) {
 
 	state->port = port;
   state->idle_timeout = -1;
-  
+
   for (int i = 0; i < MAX_CLIENTS; ++i) {
 			Client *cstate = state->client_state + i;
 
