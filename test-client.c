@@ -18,21 +18,21 @@
 
 char req[1024];
 
-static void onReadable(EventPump *pump, SocketRec *rec) {
+static void onReadable(SocketRec *rec) {
 	char buff[256];
 
 	int len = read(rec->socket, buff, sizeof(buff));
 
 	if (len == 0) {
 		//Orderly disconnect
-		pumpStop(pump);
+		pumpStop(rec->pump);
 
 		return;
 	}
-	printf("%.*s", len, buff);
+	//printf("%.*s", len, buff);
 }
 
-static void onWritable(EventPump *pump, SocketRec *rec) {
+static void onWritable(SocketRec *rec) {
 	//Write the request
 	puts(req);
 	int status = write(rec->socket, req, strlen(req));
@@ -42,15 +42,16 @@ static void onWritable(EventPump *pump, SocketRec *rec) {
 	rec->onWritable = NULL;
 }
 
-static void onConnect(EventPump *pump, SocketRec *rec, int status) {
+static void onConnect(SocketRec *rec, int status) {
+	printf("Conn status: %d\n", status);
 	assert(status == 1);
 
 	rec->onWritable = onWritable;
 }
 
-static void onTimeout(EventPump *pump, SocketRec *rec) {
+static void onTimeout(SocketRec *rec) {
 	close(rec->socket);
-	pumpStop(pump);
+	pumpStop(rec->pump);
 }
 
 int make_connection(const char *host, const char *port) {

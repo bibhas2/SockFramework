@@ -13,6 +13,6 @@ test-server-mmap: $(OBJS) test-server-mmap.o
 test-server-file: $(OBJS) test-server-file.o
 	gcc -o test-server-file test-server-file.o -L. -lsockf
 test-client: $(OBJS) test-client.o
-	gcc -o test-client test-client.o ../http-parser/libhttp_parser.o -L../Cute -L. -lsockf -lcute
+	gcc -o test-client test-client.o -L../Cute -L. -lsockf -lcute
 clean:
 	rm $(OBJS) test-client test-server-mmap test-server-file libsockf.a
