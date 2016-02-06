@@ -24,8 +24,8 @@
 static int check_connect_status(int fd) {
 	int valopt;
 	socklen_t lon = sizeof(int);
-	int result = getsockopt(fd, SOL_SOCKET, SO_ERROR, 
-		(void*)(&valopt), &lon); 
+	int result = getsockopt(fd, SOL_SOCKET, SO_ERROR,
+		(void*)(&valopt), &lon);
 	DIE(result, "Error in getsockopt()");
 	//Check the value of valopt
 	if (valopt) {
@@ -34,6 +34,45 @@ static int check_connect_status(int fd) {
 	}
 
 	return 1;
+}
+
+static int write_pending_data(SocketRec *rec) {
+	assert(rec->write_buffer != NULL);
+	assert(rec->write_length > rec->write_completed);
+
+	char *buffer_start = rec->write_buffer + rec->write_completed;
+	int bytesWritten = write(rec->socket,
+		buffer_start,
+		rec->write_length - rec->write_completed);
+
+	_info("Written %d of %zu bytes\n", bytesWritten, rec->write_length);
+
+	if (bytesWritten < 0) {
+		if (errno != EAGAIN && errno != EWOULDBLOCK) {
+			return -1;
+		}
+		//Write will block. Not an error.
+		_info("Write block detected.");
+
+		return 0;
+	}
+
+	if (bytesWritten == 0) {
+		//Client has disconnected. We convert that to an error.
+		return -1;
+	}
+
+	rec->write_completed += bytesWritten;
+
+	if (rec->write_completed == rec->write_length) {
+		pumpCancelWrite(rec);
+
+		if (rec->onWriteCompleted != NULL) {
+			rec->onWriteCompleted(rec);
+		}
+	}
+
+	return 0;
 }
 
 static void pump_loop(EventPump *pump) {
@@ -49,14 +88,14 @@ static void pump_loop(EventPump *pump) {
 		//Setup the set
 		int highest_socket = -1;
 
-		for (ListNode *n = pump->sockets->first; n != NULL; 
+		for (ListNode *n = pump->sockets->first; n != NULL;
 			n = n->next) {
 			SocketRec *rec = n->data;
 			assert(rec->socket >= 0);
 
 			FD_SET(rec->socket, &readFdSet);
 
-			if (rec->onWritable != NULL || rec->onConnect != NULL) {
+			if (rec->onWritable != NULL || rec->onConnect != NULL || rec->write_buffer != NULL) {
 				FD_SET(rec->socket, &writeFdSet);
 			}
 
@@ -64,11 +103,13 @@ static void pump_loop(EventPump *pump) {
 				rec->socket : highest_socket;
 		}
 
-                timeout.tv_sec = pump->timeout;
-                timeout.tv_usec = 0;
+    timeout.tv_sec = pump->timeout;
+    timeout.tv_usec = 0;
 
-                int numEvents = select(highest_socket + 1, &readFdSet, &writeFdSet, NULL, &timeout);
-                DIE(numEvents, "select() failed.");
+		_info("Selecting for events in %zu sockets.\n", pump->sockets->size);
+    int numEvents = select(highest_socket + 1, &readFdSet, &writeFdSet, NULL, &timeout);
+    DIE(numEvents, "select() failed.");
+
 		if (numEvents == 0) {
 			_info("select() timed out.\n");
 
@@ -82,35 +123,42 @@ static void pump_loop(EventPump *pump) {
 			}
 
 			continue; //Timeout
-                }
+    }
 
 		//Dispatch
 		for (ListNode *n = pump->sockets->first; n != NULL;) {
 			SocketRec *rec = n->data;
 			n = n->next;
 
+			//Process writable state
 			if (FD_ISSET(rec->socket, &writeFdSet)) {
 				_info("Socket writable: %d\n", rec->socket);
 				if (rec->onConnect != NULL) {
-					rec->onConnect(rec, 
+					rec->onConnect(rec,
 						check_connect_status(rec->socket));
 					rec->onConnect = NULL;
-				} else if (rec->onWritable != NULL) {
-					rec->onWritable(rec);
+				} else {
+					if (rec->onWritable != NULL) {
+						rec->onWritable(rec);
+					}
+					if (rec->write_buffer != NULL) {
+						write_pending_data(rec);
+					}
 				}
 			}
+
 			//Is socket removed?
 			if (rec->socket < 0) {
 				continue;
 			}
+
+			//Process readable state
 			if (FD_ISSET(rec->socket, &readFdSet)) {
 				_info("Socket readable: %d\n", rec->socket);
 				if (rec->onAccept != NULL) {
-					int sock = accept(rec->socket, 
-						NULL, NULL);
+					int sock = accept(rec->socket, NULL, NULL);
 					DIE(sock, "accept() failed.");
-					int status = fcntl(sock, 
-						F_SETFL, O_NONBLOCK);
+					int status = fcntl(sock, F_SETFL, O_NONBLOCK);
 					DIE(status, "Failed to set non blocking mode for client socket.");
 					rec->onAccept(rec, sock);
 				} else if (rec->onReadable != NULL) {
@@ -124,16 +172,19 @@ static void pump_loop(EventPump *pump) {
 }
 
 static SocketRec *newSocketRec() {
-	SocketRec *rec = malloc(sizeof(SocketRec));
+	SocketRec *rec = calloc(1, sizeof(SocketRec));
 	assert(rec != NULL);
 
 	rec->socket = -1;
 	rec->data = NULL;
+	rec->write_buffer = NULL;
+	rec->write_length = rec->write_completed = 0;
 	rec->onReadable = NULL;
 	rec->onAccept = NULL;
 	rec->onWritable = NULL;
 	rec->onTimeout = NULL;
 	rec->onConnect = NULL;
+	rec->onWriteCompleted = NULL;
 
 	return rec;
 }
@@ -207,15 +258,104 @@ void *pumpRemoveSocket(EventPump *pump, int socket) {
 		SocketRec *rec = n->data;
 
 		if (rec->socket == socket) {
-			listRemoveNode(pump->sockets, n);
-			deleteSocketRec(rec);
 			data = rec->data;
+			//Removed from list managed sockets
+			listRemoveNode(pump->sockets, n);
+			//Destroy the record
+			deleteSocketRec(rec);
 
-			break;
+			return data;
 		}
 	}
+
 	_info("pumpRemoveSocket received invalid socket.");
 	abort();
 
 	return data;
+}
+
+SocketRec * pumpRegisterClient(EventPump *pump, const char *host, const char *port, void *data) {
+	_info("Connecting to %s:%s\n", host, port);
+
+	struct addrinfo hints, *res;
+
+	memset(&hints, 0, sizeof(hints));
+	hints.ai_family = PF_INET;
+	hints.ai_socktype = SOCK_STREAM;
+	_info("Resolving name...");
+	int status = getaddrinfo(host, port, &hints, &res);
+	DIE(status, "Failed to resolve address.");
+	if (res == NULL) {
+		_info("Failed to resolve address: %s\n", host);
+		abort();
+	}
+
+	int sock = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
+	DIE(sock, "Failed to open socket.");
+
+	status = fcntl(sock, F_SETFL, O_NONBLOCK);
+	DIE(status, "Failed to set non blocking mode for socket.");
+
+	status = connect(sock, res->ai_addr, res->ai_addrlen);
+	freeaddrinfo(res);
+
+	_info("Asynchronous connection initiated.\n");
+	if (status < 0 && errno != EINPROGRESS) {
+		perror("Failed to connect to port.");
+		close(sock);
+
+		return NULL;
+	}
+
+	return pumpRegisterSocket(pump, sock, data);
+}
+
+SocketRec * pumpRegisterServer(EventPump *pump, int port, void *data) {
+	int status;
+
+	int sock = socket(PF_INET, SOCK_STREAM, 0);
+	DIE(sock, "Failed to open socket.");
+
+	status = fcntl(sock, F_SETFL, O_NONBLOCK);
+	DIE(status, "Failed to set non blocking mode for server listener socket.");
+
+  int reuse = 1;
+  setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof reuse);
+
+	struct sockaddr_in addr;
+
+	addr.sin_family = AF_INET;
+	addr.sin_addr.s_addr = INADDR_ANY;
+	addr.sin_port = htons(port);
+
+	status = bind(sock, (struct sockaddr*) &addr, sizeof(addr));
+	DIE(status, "Failed to bind to port.");
+
+	_info("Calling listen.\n");
+	status = listen(sock, 10);
+	_info("listen returned.\n");
+	DIE(status, "Failed to listen.\n");
+
+	return pumpRegisterSocket(pump, sock, data);
+}
+
+int pumpScheduleWrite(SocketRec *rec, char *buffer, size_t length) {
+	if (rec->write_buffer != NULL) {
+		_info("A write is already in progress.\n");
+
+		return -1;
+	}
+
+	rec->write_buffer = buffer;
+	rec->write_length = length;
+	rec->write_completed = 0;
+
+	return 0;
+}
+
+int pumpCancelWrite(SocketRec *rec) {
+	rec->write_buffer = NULL;
+	rec->write_length = rec->write_completed = 0;
+
+	return 0;
 }
