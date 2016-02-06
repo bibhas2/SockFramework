@@ -251,13 +251,13 @@ SocketRec *pumpRegisterSocket(EventPump *pump, int socket, void *data) {
 	return rec;
 }
 
-void *pumpRemoveSocket(EventPump *pump, int socket) {
+void *pumpRemoveSocket(EventPump *pump, SocketRec *recToRemove) {
 	void *data = NULL;
 
 	for (ListNode *n = pump->sockets->first; n != NULL; n = n->next) {
 		SocketRec *rec = n->data;
 
-		if (rec->socket == socket) {
+		if (rec == recToRemove) {
 			data = rec->data;
 			//Removed from list managed sockets
 			listRemoveNode(pump->sockets, n);

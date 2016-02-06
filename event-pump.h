@@ -38,7 +38,7 @@ typedef struct _EventPump {
 EventPump *newEventPump();
 void deleteEventPump(EventPump *pump);
 SocketRec *pumpRegisterSocket(EventPump *pump, int socket, void *data);
-void *pumpRemoveSocket(EventPump *pump, int socket);
+void *pumpRemoveSocket(EventPump *pump, SocketRec *rec);
 int pumpStart(EventPump *pump);
 int pumpStop(EventPump *pump);
 int pumpScheduleWrite(SocketRec *rec, char *buffer, size_t length);

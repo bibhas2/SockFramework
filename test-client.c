@@ -24,6 +24,7 @@ static void onReadable(SocketRec *rec) {
 	int len = read(rec->socket, buff, sizeof(buff));
 
 	if (len == 0) {
+		_info("Server has disconnected.\n");
 		//Orderly disconnect
 		pumpStop(rec->pump);
 

@@ -21,7 +21,7 @@ static void onWriteCompleted(SocketRec *client) {
 		//Disconnect
 		close(client->socket);
 		//Unregister
-		pumpRemoveSocket(client->pump, client->socket);
+		pumpRemoveSocket(client->pump, client);
 }
 
 static void onWritable(SocketRec *client) {
@@ -42,7 +42,7 @@ static void onReadable(SocketRec *client) {
 		//Disconnect
 		close(client->socket);
 		//Unregister
-		pumpRemoveSocket(client->pump, client->socket);
+		pumpRemoveSocket(client->pump, client);
 
 		return;
 	}
