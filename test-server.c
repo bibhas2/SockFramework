@@ -24,7 +24,9 @@ static void onWriteCompleted(SocketRec *client) {
 		pumpRemoveSocket(client->pump, client);
 }
 
-static void onWritable(SocketRec *client) {
+static void write_response(SocketRec *client) {
+	client->onWriteCompleted = onWriteCompleted;
+
 	//Write the request
 	char *response = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n<h1>It works</h1>";
 	int status = pumpScheduleWrite(client, response, strlen(response));
@@ -47,10 +49,11 @@ static void onReadable(SocketRec *client) {
 		return;
 	}
 	printf("%.*s", len, buff);
-
-	client->onWritable = onWritable;
+	//Write response unless we have already done that
+	if (client->onWriteCompleted == NULL) {
+		write_response(client);
+	}
 }
-
 
 static void onAccept(SocketRec *server, int sock) {
 	printf("Accepted socket: %d\n", sock);
@@ -58,7 +61,6 @@ static void onAccept(SocketRec *server, int sock) {
 
 	SocketRec *client = pumpRegisterSocket(server->pump, sock, server);
 	client->onReadable = onReadable;
-	client->onWriteCompleted = onWriteCompleted;
 }
 
 int main(int argc, char **argv) {
