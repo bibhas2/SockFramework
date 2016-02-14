@@ -88,8 +88,7 @@ static void pump_loop(EventPump *pump) {
 		//Setup the set
 		int highest_socket = -1;
 
-		for (ListNode *n = pump->sockets->first; n != NULL;
-			n = n->next) {
+		for (ListNode *n = pump->sockets->first; n != NULL; n = n->next) {
 			SocketRec *rec = n->data;
 			assert(rec->socket >= 0);
 
@@ -113,9 +112,8 @@ static void pump_loop(EventPump *pump) {
 		if (numEvents == 0) {
 			_info("select() timed out.\n");
 
-			for (ListNode *n = pump->sockets->first; n != NULL;) {
+			for (ListNode *n = pump->sockets->first; n != NULL; n = n->next) {
 				SocketRec *rec = n->data;
-				n = n->next;
 
 				if (rec->onTimeout != NULL) {
 					rec->onTimeout(rec);
@@ -126,9 +124,8 @@ static void pump_loop(EventPump *pump) {
     }
 
 		//Dispatch
-		for (ListNode *n = pump->sockets->first; n != NULL;) {
+		for (ListNode *n = pump->sockets->first; n != NULL; n = n->next) {
 			SocketRec *rec = n->data;
-			n = n->next;
 
 			//Process writable state
 			if (FD_ISSET(rec->socket, &writeFdSet)) {
@@ -192,6 +189,14 @@ static SocketRec *newSocketRec() {
 static void deleteSocketRec(SocketRec *rec) {
 	rec->socket = -1;
 	rec->data = NULL;
+	rec->write_buffer = NULL;
+	rec->write_length = rec->write_completed = 0;
+	rec->onReadable = NULL;
+	rec->onAccept = NULL;
+	rec->onWritable = NULL;
+	rec->onTimeout = NULL;
+	rec->onConnect = NULL;
+	rec->onWriteCompleted = NULL;
 
 	free(rec);
 }
