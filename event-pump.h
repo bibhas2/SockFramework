@@ -4,6 +4,9 @@
 #define PUMP_STATUS_RUNNING 1
 #define PUMP_STATUS_STOP_REQUESTED 2
 
+#define PUMP_PHASE_FDSET 1
+#define PUMP_PHASE_DISPATCH 2
+
 struct _EventPump;
 
 typedef struct _SocketRec {
@@ -13,6 +16,8 @@ typedef struct _SocketRec {
 	char *write_buffer;
 	size_t write_length;
 	size_t write_completed;
+	int flag_for_delete;
+	int fd_was_set;
 
 	void (*onAccept)
 		(struct _SocketRec *rec, int accepted_socket);
@@ -33,6 +38,7 @@ typedef struct _EventPump {
 	time_t timeout;
 	int control_pipe[2];
 	List *sockets;
+	int phase;
 } EventPump;
 
 EventPump *newEventPump();

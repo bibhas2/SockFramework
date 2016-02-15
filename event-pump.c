@@ -21,6 +21,8 @@
 #define _info //
 #endif
 
+static void perform_pending_socket_removal(EventPump *pump);
+
 static int check_connect_status(int fd) {
 	int valopt;
 	socklen_t lon = sizeof(int);
@@ -82,8 +84,13 @@ static void pump_loop(EventPump *pump) {
 	pump->status = PUMP_STATUS_RUNNING;
 
 	while (pump->status == PUMP_STATUS_RUNNING) {
+
+		pump->phase = PUMP_PHASE_FDSET;
 		FD_ZERO(&readFdSet);
 		FD_ZERO(&writeFdSet);
+
+		//Remove any sockets flagged for delete
+		perform_pending_socket_removal(pump);
 
 		//Setup the set
 		int highest_socket = -1;
@@ -98,6 +105,8 @@ static void pump_loop(EventPump *pump) {
 				FD_SET(rec->socket, &writeFdSet);
 			}
 
+			rec->fd_was_set = 1;
+
 			highest_socket = rec->socket > highest_socket ?
 				rec->socket : highest_socket;
 		}
@@ -109,11 +118,17 @@ static void pump_loop(EventPump *pump) {
     int numEvents = select(highest_socket + 1, &readFdSet, &writeFdSet, NULL, &timeout);
     DIE(numEvents, "select() failed.");
 
+		pump->phase = PUMP_PHASE_DISPATCH;
+
 		if (numEvents == 0) {
 			_info("select() timed out.\n");
 
 			for (ListNode *n = pump->sockets->first; n != NULL; n = n->next) {
 				SocketRec *rec = n->data;
+
+				if (rec->fd_was_set == 0) {
+					continue;
+				}
 
 				if (rec->onTimeout != NULL) {
 					rec->onTimeout(rec);
@@ -126,6 +141,10 @@ static void pump_loop(EventPump *pump) {
 		//Dispatch
 		for (ListNode *n = pump->sockets->first; n != NULL; n = n->next) {
 			SocketRec *rec = n->data;
+
+			if (rec->fd_was_set == 0) {
+				continue;
+			}
 
 			//Process writable state
 			if (FD_ISSET(rec->socket, &writeFdSet)) {
@@ -145,8 +164,8 @@ static void pump_loop(EventPump *pump) {
 			}
 
 			//Is socket removed?
-			if (rec->socket < 0) {
-				continue;
+			if (rec->flag_for_delete == 1 || rec->socket < 0) {
+				continue; //No need to proceed
 			}
 
 			//Process readable state
@@ -182,6 +201,8 @@ static SocketRec *newSocketRec() {
 	rec->onTimeout = NULL;
 	rec->onConnect = NULL;
 	rec->onWriteCompleted = NULL;
+	rec->fd_was_set = 0;
+	rec->flag_for_delete = 0;
 
 	return rec;
 }
@@ -256,6 +277,37 @@ SocketRec *pumpRegisterSocket(EventPump *pump, int socket, void *data) {
 	return rec;
 }
 
+static void remove_socket(EventPump *pump, ListNode *n) {
+	assert(pump->phase != PUMP_PHASE_DISPATCH);
+
+	SocketRec *rec = n->data;
+
+	_info("Removing socket record: %p\n", rec);
+
+	//Destroy the record
+	deleteSocketRec(rec);
+
+	//Removed from list managed sockets
+	listRemoveNode(pump->sockets, n);
+}
+
+static void perform_pending_socket_removal(EventPump *pump) {
+	assert(pump->phase != PUMP_PHASE_DISPATCH);
+
+	for (ListNode *n = pump->sockets->first; n != NULL;) {
+		SocketRec *rec = n->data;
+
+		if (rec->flag_for_delete == 1) {
+			ListNode *nextNode = n->next;
+			remove_socket(pump, n);
+
+			n = nextNode;
+		} else {
+			n = n->next;
+		}
+	}
+}
+
 void *pumpRemoveSocket(EventPump *pump, SocketRec *recToRemove) {
 	void *data = NULL;
 
@@ -264,10 +316,16 @@ void *pumpRemoveSocket(EventPump *pump, SocketRec *recToRemove) {
 
 		if (rec == recToRemove) {
 			data = rec->data;
-			//Removed from list managed sockets
-			listRemoveNode(pump->sockets, n);
-			//Destroy the record
-			deleteSocketRec(rec);
+			/*
+			 * We can not remove the record if the pump is
+			 * in the middle of any list iteration.
+			 */
+			if (pump->phase == PUMP_PHASE_DISPATCH) {
+				_info("Flagging socket record for later removal: %p\n", rec);
+				rec->flag_for_delete = 1;
+			} else {
+				remove_socket(pump, n);
+			}
 
 			return data;
 		}
@@ -287,7 +345,7 @@ SocketRec * pumpRegisterClient(EventPump *pump, const char *host, const char *po
 	memset(&hints, 0, sizeof(hints));
 	hints.ai_family = PF_INET;
 	hints.ai_socktype = SOCK_STREAM;
-	_info("Resolving name...");
+
 	int status = getaddrinfo(host, port, &hints, &res);
 	DIE(status, "Failed to resolve address.");
 	if (res == NULL) {
