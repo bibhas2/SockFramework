@@ -99,13 +99,17 @@ static void pump_loop(EventPump *pump) {
 			SocketRec *rec = n->data;
 			assert(rec->socket >= 0);
 
-			FD_SET(rec->socket, &readFdSet);
+			rec->fd_was_set = 0;
+
+			if (rec->onAccept != NULL || rec->onReadable != NULL) {
+				FD_SET(rec->socket, &readFdSet);
+				rec->fd_was_set = 1;
+			}
 
 			if (rec->onWritable != NULL || rec->onConnect != NULL || rec->write_buffer != NULL) {
 				FD_SET(rec->socket, &writeFdSet);
+				rec->fd_was_set = 1;
 			}
-
-			rec->fd_was_set = 1;
 
 			highest_socket = rec->socket > highest_socket ?
 				rec->socket : highest_socket;
