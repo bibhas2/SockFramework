@@ -37,6 +37,7 @@ typedef struct _Server {
 
 	void (*on_loop_start)(struct _Server* state);
 	void (*on_loop_end)(struct _Server* state);
+	void (*on_timeout)(struct _Server* state);
 	void (*on_client_connect)(struct _Server* state, Client* client_state);
 	void (*on_client_disconnect)(struct _Server* state, Client *client_state);
 	void (*on_read)(struct _Server* state, Client *client_state, char* buffer, size_t length);
@@ -45,8 +46,7 @@ typedef struct _Server {
 	void (*on_write_completed)(struct _Server* state, Client *client_state);
 } Server;
 
-void _info(const char* fmt, ...);
-
+void enableTrace(int flag);
 Server *newServer(int port);
 void serverStart(Server* state);
 void deleteServer(Server *state);

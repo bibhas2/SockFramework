@@ -7,6 +7,8 @@
 
 #include "socket-framework.h"
 
+#define _info printf
+
 typedef enum {
 	STATE_NONE,
 	STATE_READING_PROTOCOL_LINE,

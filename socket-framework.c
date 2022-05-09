@@ -13,19 +13,30 @@
 
 #define DIE(value, message) if (value < 0) {perror(message); exit(value);}
 
+static int trace_on = 0;
+
 void
-_info(const char* fmt, ...) {
-        va_list ap;
+_trace(const char* fmt, ...) {
+	if (trace_on == 0) {
+		return;
+	}
 
-        va_start(ap, fmt);
+	va_list ap;
 
-        printf("INFO: ");
-        vprintf(fmt, ap);
-        printf("\n");
+	va_start(ap, fmt);
+
+	printf("INFO: ");
+	vprintf(fmt, ap);
+	printf("\n");
+}
+
+void
+enableTrace(int flag) {
+	trace_on = flag;
 }
 
 static void reset_client(Client *cstate) {
-  _info("Resetting client: %d", cstate->fd);
+  _trace("Resetting client: %d", cstate->fd);
 
   cstate->fd = -1;
   cstate->data = NULL;
@@ -119,17 +130,17 @@ remove_client_fd(Server *state, int fd) {
 int
 handle_client_write(Server* state, Client *cli_state) {
 	if (!(cli_state->read_write_flag & RW_STATE_READ)) {
-		_info("Socket is not trying to read.");
+		_trace("Socket is not trying to read.");
 
 		return -1;
 	}
 	if (cli_state->read_buffer == NULL) {
-		_info("Read buffer not setup.");
+		_trace("Read buffer not setup.");
 
 		return -1;
 	}
 	if (cli_state->read_length == cli_state->read_completed) {
-		_info("Read was already completed.");
+		_trace("Read was already completed.");
 
 		return -1;
 	}
@@ -139,14 +150,14 @@ handle_client_write(Server* state, Client *cli_state) {
 		buffer_start,
 		cli_state->read_length - cli_state->read_completed);
 
-	_info("Read %d of %d bytes", bytesRead, cli_state->read_length);
+	_trace("Read %d of %d bytes", bytesRead, cli_state->read_length);
 
 	if (bytesRead < 0) {
 		if (errno != EAGAIN && errno != EWOULDBLOCK) {
 			return -1;
 		}
 		//Read will block. Not an error.
-		_info("Read block detected.");
+		_trace("Read block detected.");
 		return 0;
 	}
 	if (bytesRead == 0) {
@@ -173,17 +184,17 @@ handle_client_write(Server* state, Client *cli_state) {
 int
 handle_client_read(Server* state, Client *cli_state) {
 	if (!(cli_state->read_write_flag & RW_STATE_WRITE)) {
-		_info("Socket is not trying to write.");
+		_trace("Socket is not trying to write.");
 
 		return -1;
 	}
 	if (cli_state->write_buffer == NULL) {
-		_info("Write buffer not setup.");
+		_trace("Write buffer not setup.");
 
 		return -1;
 	}
 	if (cli_state->write_length == cli_state->write_completed) {
-		_info("Write was already completed.");
+		_trace("Write was already completed.");
 
 		return -1;
 	}
@@ -193,14 +204,14 @@ handle_client_read(Server* state, Client *cli_state) {
 		buffer_start,
 		cli_state->write_length - cli_state->write_completed);
 
-	_info("Written %d of %d bytes", bytesWritten, cli_state->write_length);
+	_trace("Written %d of %d bytes", bytesWritten, cli_state->write_length);
 
 	if (bytesWritten < 0) {
 		if (errno != EAGAIN && errno != EWOULDBLOCK) {
 			return -1;
 		}
 		//Write will block. Not an error.
-		_info("Write block detected.");
+		_trace("Write block detected.");
 
 		return 0;
 	}
@@ -261,14 +272,18 @@ server_loop(Server *state) {
 		DIE(numEvents, "select() failed.");
 
 		if (numEvents == 0) {
-			_info("select() timed out.");
+			_trace("select() timed out.");
 
-			break;
+			if (state->on_timeout) {
+				state->on_timeout(state);
+			}
+
+			continue;
 		}
 
 		//Make sense out of the event
 		if (FD_ISSET(state->server_socket, &readFdSet)) {
-			_info("Client is connecting...");
+			_trace("Client is connecting...");
 			int clientFd = accept(state->server_socket, NULL, NULL);
 
 			DIE(clientFd, "accept() failed.");
@@ -276,7 +291,7 @@ server_loop(Server *state) {
 			int position = add_client_fd(state, clientFd);
 
 			if (position < 0) {
-				_info("Too many clients. Disconnecting...");
+				_trace("Too many clients. Disconnecting...");
 				close(clientFd);
 				remove_client_fd(state, clientFd);
 			}
@@ -300,7 +315,7 @@ server_loop(Server *state) {
 					Client *cli_state = state->client_state + i;
 					int status = handle_client_write(state, cli_state);
 					if (status < 1) {
-						_info("Client is finished. Status: %d", status);
+						_trace("Client is finished. Status: %d", status);
 						if (state->on_client_disconnect) {
 							state->on_client_disconnect(state, cli_state);
 						}
@@ -318,7 +333,7 @@ server_loop(Server *state) {
 					Client *cli_state = state->client_state + i;
 					int status = handle_client_read(state, cli_state);
 					if (status < 1) {
-						_info("Client is finished. Status: %d", status);
+						_trace("Client is finished. Status: %d", status);
 						if (state->on_client_disconnect) {
 							state->on_client_disconnect(state, cli_state);
 						}
@@ -357,9 +372,9 @@ serverStart(Server *state) {
 
 	DIE(status, "Failed to bind to port.");
 
-	_info("Calling listen.");
+	_trace("Calling listen.");
 	status = listen(sock, 10);
-	_info("listen returned.");
+	_trace("listen returned.");
 
 	DIE(status, "Failed to listen.");
 
@@ -399,7 +414,7 @@ int clientScheduleRead(Client *cstate, char *buffer, size_t length) {
 	cstate->read_completed = 0;
 	cstate->read_write_flag |= RW_STATE_READ;
 
-	_info("Scheduling read for socket: %d", cstate->fd);
+	_trace("Scheduling read for socket: %d", cstate->fd);
 	return 0;
 }
 
@@ -412,7 +427,7 @@ int clientScheduleWrite(Client *cstate, char *buffer, size_t length) {
 	cstate->write_completed = 0;
 	cstate->read_write_flag |= RW_STATE_WRITE;
 
-	_info("Scheduling write for socket: %d", cstate->fd);
+	_trace("Scheduling write for socket: %d", cstate->fd);
 	return 0;
 }
 
@@ -421,12 +436,12 @@ void clientCancelRead(Client *cstate) {
 	cstate->read_length = 0;
 	cstate->read_completed = 0;
 	cstate->read_write_flag &= ~RW_STATE_READ;
-	_info("Cancel read for socket: %d", cstate->fd);
+	_trace("Cancel read for socket: %d", cstate->fd);
 }
 void clientCancelWrite(Client *cstate) {
 	cstate->write_buffer = NULL;
 	cstate->write_length = 0;
 	cstate->write_completed = 0;
 	cstate->read_write_flag &= ~RW_STATE_WRITE;
-	_info("Cancel write for socket: %d", cstate->fd);
+	_trace("Cancel write for socket: %d", cstate->fd);
 }
