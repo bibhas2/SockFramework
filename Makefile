@@ -17,4 +17,4 @@ test-client: $(OBJS) test-client.o
 test-server: $(OBJS) test-server.o
 	gcc -o test-server test-server.o -L../Cute -L. -lsockf -lcute
 clean:
-	rm $(OBJS) *.o test-client test-server-mmap test-server-file libsockf.a
+	rm -f $(OBJS) *.o test-client test-server-mmap test-server-file test-server libsockf.a
