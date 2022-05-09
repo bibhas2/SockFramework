@@ -1,5 +1,5 @@
 CC=gcc
-CFLAGS=-std=c99 -g
+CFLAGS=-std=gnu99 -g
 OBJS=socket-framework.o client-framework.o event-pump.o
 
 all: libsockf.a test-server-mmap test-server-file test-client test-server
@@ -17,4 +17,4 @@ test-client: $(OBJS) test-client.o
 test-server: $(OBJS) test-server.o
 	gcc -o test-server test-server.o -L../Cute -L. -lsockf -lcute
 clean:
-	rm $(OBJS) test-client test-server-mmap test-server-file libsockf.a
+	rm $(OBJS) *.o test-client test-server-mmap test-server-file libsockf.a
