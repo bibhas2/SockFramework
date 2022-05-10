@@ -50,27 +50,32 @@ static void reset_client(Client *cstate) {
     cstate->write_completed = 0;
 }
 
-void
-populate_fd_set(Server *state, fd_set *pReadFdSet, fd_set *pWriteFdSet) {
+void populate_fd_set(EventLoop *loop, fd_set *pReadFdSet, fd_set *pWriteFdSet) {
     FD_ZERO(pReadFdSet);
     FD_ZERO(pWriteFdSet);
     
-    //Set the server socket
-    FD_SET(state->server_socket, pReadFdSet);
-    
-    //Set the clients
-    for (int i = 0; i < MAX_CLIENTS; ++i) {
-        int fd = state->client_state[i].fd;
+    for (int j = 0; j < MAX_SERVERS; ++j) {
+        Server *state = loop->server_state[j];
         
-        if (fd < 0) {
-            continue;
-        }
-        
-        if (state->client_state[i].read_write_flag & RW_STATE_READ) {
-            FD_SET(fd, pReadFdSet);
-        }
-        if (state->client_state[i].read_write_flag & RW_STATE_WRITE) {
-            FD_SET(fd, pWriteFdSet);
+        if (state != NULL) {
+            //Set the server socket
+            FD_SET(state->server_socket, pReadFdSet);
+            
+            //Set the clients
+            for (int i = 0; i < MAX_CLIENTS; ++i) {
+                int fd = state->client_state[i].fd;
+                
+                if (fd < 0) {
+                    continue;
+                }
+                
+                if (state->client_state[i].read_write_flag & RW_STATE_READ) {
+                    FD_SET(fd, pReadFdSet);
+                }
+                if (state->client_state[i].read_write_flag & RW_STATE_WRITE) {
+                    FD_SET(fd, pWriteFdSet);
+                }
+            }
         }
     }
 }
@@ -328,13 +333,7 @@ loopStart(EventLoop *loop) {
     struct timeval timeout;
     
     while (loop->continue_loop == 1) {
-        for (int i = 0; i < MAX_SERVERS; ++i) {
-            Server *s = loop->server_state[i];
-            
-            if (s != NULL) {
-                populate_fd_set(s, &readFdSet, &writeFdSet);
-            }
-        }
+        populate_fd_set(loop, &readFdSet, &writeFdSet);
                 
         timeout.tv_sec = loop->idle_timeout;
         timeout.tv_usec = 0;
@@ -475,6 +474,7 @@ void loopInit(EventLoop *loop) {
     }
     
     loop->continue_loop = 0;
+    loop->idle_timeout = 0;
 }
 
 int loopAddServer(EventLoop *loop, Server *state) {
