@@ -1,4 +1,5 @@
 #define MAX_CLIENTS 5
+#define MAX_SERVERS 5
 
 #define RW_STATE_NONE 0
 #define RW_STATE_READ 2
@@ -33,7 +34,6 @@ typedef struct _Server {
 	Client client_state[MAX_CLIENTS];
 	int port;
 	int server_socket;
-	int idle_timeout; //Timeout in seconds. -1 for no timeout.
 
 	void (*on_loop_start)(struct _Server* state);
 	void (*on_loop_end)(struct _Server* state);
@@ -45,6 +45,12 @@ typedef struct _Server {
 	void (*on_read_completed)(struct _Server* state, Client *client_state);
 	void (*on_write_completed)(struct _Server* state, Client *client_state);
 } Server;
+
+typedef struct {
+    Server *server_state[MAX_SERVERS];
+    int continue_loop;
+    int idle_timeout; //Timeout in seconds. -1 for no timeout.
+} EventLoop;
 
 void enableTrace(int flag);
 Server *newServer(int port);
@@ -59,3 +65,8 @@ void clientLoop(Client *cstate);
 Client* newClient(const char *host, int port);
 int clientMakeConnection(Client *cstate);
 void deleteClient(Client *cstate);
+void loopInit(EventLoop *loop);
+int loopAddServer(EventLoop *loop, Server *state);
+int loopRemoveServer(EventLoop *loop, Server *state);
+void loopStart(EventLoop *loop);
+void loopEnd(EventLoop *loop);

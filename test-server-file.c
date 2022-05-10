@@ -121,7 +121,7 @@ void on_read(Server *state, Client *cli_state, char *buff, size_t length) {
 				httpState->parse_state = WRITE_RESPONSE_HEADER;
 
 				if (httpState->file == NULL) {
-					write_to_client(httpState, cli_state, "HTTP/1.1 404 Not Found\r\n\r\n");
+					write_to_client(httpState, cli_state, "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n");
 				} else {
 					struct stat st;
 
@@ -132,7 +132,7 @@ void on_read(Server *state, Client *cli_state, char *buff, size_t length) {
 					} else {
 						perror("Can not stat file.");
 
-						strcpy(tmp, "HTTP/1.1 500 Internal Server Error");
+						strcpy(tmp, "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\n\r\n");
 
 						fclose(httpState->file);
 						httpState->file = NULL;
@@ -188,6 +188,14 @@ int main() {
 	state->on_write_completed = on_write_completed;
 
 	serverStart(state);
+    
+    EventLoop loop;
+    
+    loopInit(&loop);
+    
+    loopAddServer(&loop, state);
+    
+    loopStart(&loop);
 
 	deleteServer(state);
 }

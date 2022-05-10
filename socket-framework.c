@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <string.h>
 #include <stdarg.h>
 #include <stdlib.h>
 #include <assert.h>
@@ -246,20 +247,96 @@ serverDisconnect(Server *state, Client *cli_state) {
     remove_client_fd(state, cli_state->fd);
 }
 
+void dispatch_event(Server *state, fd_set *readFdSet, fd_set *writeFdSet) {
+    //Make sense out of the event
+    if (FD_ISSET(state->server_socket, readFdSet)) {
+        _trace("Client is connecting...");
+        int clientFd = accept(state->server_socket, NULL, NULL);
+        
+        DIE(clientFd, "accept() failed.");
+        
+        int position = add_client_fd(state, clientFd);
+        
+        if (position < 0) {
+            _trace("Too many clients. Disconnecting...");
+            close(clientFd);
+            remove_client_fd(state, clientFd);
+        }
+        
+        int status = fcntl(clientFd, F_SETFL, O_NONBLOCK);
+        DIE(status, "Failed to set non blocking mode for client socket.");
+        
+        if (state->on_client_connect) {
+            state->on_client_connect(state, state->client_state + position);
+        }
+    } else {
+        //Client wrote something or disconnected
+        for (int i = 0; i < MAX_CLIENTS; ++i) {
+            
+            if (state->client_state[i].fd < 0) {
+                //This slot is not in use
+                continue;
+            }
+            
+            if (FD_ISSET(state->client_state[i].fd, readFdSet)) {
+                Client *cli_state = state->client_state + i;
+                int status = handle_client_write(state, cli_state);
+                if (status < 1) {
+                    _trace("Client is finished. Status: %d", status);
+                    if (state->on_client_disconnect) {
+                        state->on_client_disconnect(state, cli_state);
+                    }
+                    close(cli_state->fd);
+                    remove_client_fd(state, cli_state->fd);
+                }
+            }
+            
+            if (state->client_state[i].fd < 0) {
+                //Client write event caused application to disconnect.
+                continue;
+            }
+            
+            if (FD_ISSET(state->client_state[i].fd, writeFdSet)) {
+                Client *cli_state = state->client_state + i;
+                int status = handle_client_read(state, cli_state);
+                if (status < 1) {
+                    _trace("Client is finished. Status: %d", status);
+                    if (state->on_client_disconnect) {
+                        state->on_client_disconnect(state, cli_state);
+                    }
+                    close(cli_state->fd);
+                    remove_client_fd(state, cli_state->fd);
+                }
+            }
+        }
+    }
+}
+
 void
-server_loop(Server *state) {
-    if (state->on_loop_start) {
-        state->on_loop_start(state);
+loopStart(EventLoop *loop) {
+    loop->continue_loop = 1;
+    
+    for (int i = 0; i < MAX_SERVERS; ++i) {
+        Server *s = loop->server_state[i];
+        
+        if (s != NULL && s->on_loop_start != NULL) {
+            s->on_loop_start(s);
+        }
     }
     
     fd_set readFdSet, writeFdSet;
     struct timeval timeout;
     
-    
-    while (1) {
-        populate_fd_set(state, &readFdSet, &writeFdSet);
-        
-        timeout.tv_sec = state->idle_timeout;
+    while (loop->continue_loop == 1) {
+        for (int i = 0; i < MAX_SERVERS; ++i) {
+            Server *s = loop->server_state[i];
+            
+            if (s != NULL) {
+                populate_fd_set(s, &readFdSet, &writeFdSet);
+            }
+        }
+                
+        timeout.tv_sec = loop->idle_timeout;
         timeout.tv_usec = 0;
         
         int numEvents = select(
@@ -267,85 +344,31 @@ server_loop(Server *state) {
                                &readFdSet,
                                &writeFdSet,
                                NULL,
-                               state->idle_timeout > 0 ? &timeout : NULL);
+                               loop->idle_timeout > 0 ? &timeout : NULL);
         
         DIE(numEvents, "select() failed.");
         
         if (numEvents == 0) {
             _trace("select() timed out.");
-            
-            if (state->on_timeout) {
-                state->on_timeout(state);
+            for (int i = 0; i < MAX_SERVERS; ++i) {
+                Server *s = loop->server_state[i];
+                
+                if (s != NULL && s->on_timeout != NULL) {
+                    s->on_timeout(s);
+                }
             }
             
             continue;
         }
         
-        //Make sense out of the event
-        if (FD_ISSET(state->server_socket, &readFdSet)) {
-            _trace("Client is connecting...");
-            int clientFd = accept(state->server_socket, NULL, NULL);
+        for (int i = 0; i < MAX_SERVERS; ++i) {
+            Server *s = loop->server_state[i];
             
-            DIE(clientFd, "accept() failed.");
-            
-            int position = add_client_fd(state, clientFd);
-            
-            if (position < 0) {
-                _trace("Too many clients. Disconnecting...");
-                close(clientFd);
-                remove_client_fd(state, clientFd);
-            }
-            
-            int status = fcntl(clientFd, F_SETFL, O_NONBLOCK);
-            DIE(status, "Failed to set non blocking mode for client socket.");
-            
-            if (state->on_client_connect) {
-                state->on_client_connect(state, state->client_state + position);
-            }
-        } else {
-            //Client wrote something or disconnected
-            for (int i = 0; i < MAX_CLIENTS; ++i) {
-                
-                if (state->client_state[i].fd < 0) {
-                    //This slot is not in use
-                    continue;
-                }
-                
-                if (FD_ISSET(state->client_state[i].fd, &readFdSet)) {
-                    Client *cli_state = state->client_state + i;
-                    int status = handle_client_write(state, cli_state);
-                    if (status < 1) {
-                        _trace("Client is finished. Status: %d", status);
-                        if (state->on_client_disconnect) {
-                            state->on_client_disconnect(state, cli_state);
-                        }
-                        close(cli_state->fd);
-                        remove_client_fd(state, cli_state->fd);
-                    }
-                }
-                
-                if (state->client_state[i].fd < 0) {
-                    //Client write event caused application to disconnect.
-                    continue;
-                }
-                
-                if (FD_ISSET(state->client_state[i].fd, &writeFdSet)) {
-                    Client *cli_state = state->client_state + i;
-                    int status = handle_client_read(state, cli_state);
-                    if (status < 1) {
-                        _trace("Client is finished. Status: %d", status);
-                        if (state->on_client_disconnect) {
-                            state->on_client_disconnect(state, cli_state);
-                        }
-                        close(cli_state->fd);
-                        remove_client_fd(state, cli_state->fd);
-                    }
-                }
+            if (s != NULL) {
+                dispatch_event(s, &readFdSet, &writeFdSet);
             }
         }
     }
-    
-    disconnect_clients(state);
 }
 
 void
@@ -379,17 +402,12 @@ serverStart(Server *state) {
     DIE(status, "Failed to listen.");
     
     state->server_socket = sock;
-    
-    server_loop(state);
-    
-    close(sock);
 }
 
 Server* newServer(int port) {
     Server *state = (Server*) calloc(1, sizeof(Server));
     
     state->port = port;
-    state->idle_timeout = -1;
     
     for (int i = 0; i < MAX_CLIENTS; ++i) {
         Client *cstate = state->client_state + i;
@@ -400,8 +418,13 @@ Server* newServer(int port) {
     return state;
 }
 
-void
-deleteServer(Server *state) {
+void deleteServer(Server *state) {
+    disconnect_clients(state);
+    
+    if (state->server_socket >= 0) {
+        close(state->server_socket);
+    }
+    
     free(state);
 }
 
@@ -444,4 +467,42 @@ void clientCancelWrite(Client *cstate) {
     cstate->write_completed = 0;
     cstate->read_write_flag &= ~RW_STATE_WRITE;
     _trace("Cancel write for socket: %d", cstate->fd);
+}
+
+void loopInit(EventLoop *loop) {
+    for (int i = 0; i < MAX_SERVERS; ++i) {
+        loop->server_state[i] = NULL;
+    }
+    
+    loop->continue_loop = 0;
+}
+
+int loopAddServer(EventLoop *loop, Server *state) {
+    assert(state->server_socket >= 0);
+    
+    for (int i = 0; i < MAX_SERVERS; ++i) {
+        if (loop->server_state[i] == NULL) {
+            loop->server_state[i] = state;
+            
+            return 0;
+        }
+    }
+    
+    return -1;
+}
+
+int loopRemoveServer(EventLoop *loop, Server *state) {
+    for (int i = 0; i < MAX_SERVERS; ++i) {
+        if (loop->server_state[i] == state) {
+            loop->server_state[i] = NULL;
+            
+            return 0;
+        }
+    }
+    
+    return -1;
+}
+
+void loopEnd(EventLoop *loop) {
+    loop->continue_loop = 0;
 }
