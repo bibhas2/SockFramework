@@ -345,6 +345,11 @@ loopStart(EventLoop *loop) {
                                NULL,
                                loop->idle_timeout > 0 ? &timeout : NULL);
         
+        if (numEvents < 0 && errno == EINTR) {
+            //A signal was handled
+            continue;
+        }
+
         DIE(numEvents, "select() failed.");
         
         if (numEvents == 0) {
